@@ -44,7 +44,7 @@ Outputs in `output/<site>/`: `episodes.parquet` (one row per IMV episode with nu
 
 ## Tests
 
-`tests/oracle/` holds upstream's own output on the synthetic data: `upstream_synth10k.json` (funnels, episode and proning rows, data quality), `upstream_synth10k_timelines.json` (26 episodes), the config that produced them, and a pristine copy of upstream `metrics.js`. `test_oracle.py` checks the build reproduces the rows and funnels; `test_server.py` checks the API's aggregates against upstream `metrics.js` run under node, and its timelines against upstream's. Any change to metric logic should move these tests deliberately, never incidentally.
+`tests/oracle/` holds upstream's own output on the synthetic data: `upstream_synth10k.json` (funnels, episode and proning rows, data quality), `upstream_synth10k_timelines.json` (26 episodes), the config that produced them (its `decisions_file` and `output_html` point into a deleted scratch clone of upstream; repoint them before rerunning upstream), and a pristine copy of upstream `metrics.js`. `test_oracle.py` checks the build reproduces the rows and funnels; `test_server.py` checks the API's aggregates against upstream `metrics.js` run under node, and its timelines against upstream's. Any change to metric logic should move these tests deliberately, never incidentally.
 
 ## Synthetic data
 
