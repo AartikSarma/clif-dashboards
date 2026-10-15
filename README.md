@@ -70,4 +70,8 @@ The tests build the synthetic dataset once, then check three things against the 
 
 ## License and credit
 
-Not yet licensed for release: share this repository only with named collaborators. The metric logic and interface derive from [clif-icu-quality-dashboard](https://github.com/cag-lab/clif-icu-quality-dashboard) by Cathy Gao-Howard on behalf of the CLIF Consortium, released under GPL-3.0-or-later. The proning measures port [CLIF_Proning_Incidence_Severe_ARF](https://github.com/Common-Longitudinal-ICU-data-Format/CLIF_Proning_Incidence_Severe_ARF), and the respiratory-support waterfall and encounter stitching come from [clifpy](https://github.com/Common-Longitudinal-ICU-data-Format/clifpy) (Apache-2.0).
+Copyright (C) 2026 Aartik Sarma and CLIF Consortium contributors.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version (GPL-3.0-or-later). See [LICENSE](LICENSE).
+
+The metric logic and interface derive from [clif-icu-quality-dashboard](https://github.com/cag-lab/clif-icu-quality-dashboard) by Cathy Gao-Howard on behalf of the CLIF Consortium, released under GPL-3.0-or-later. Third-party material keeps its own terms: the proning measures port [CLIF_Proning_Incidence_Severe_ARF](https://github.com/Common-Longitudinal-ICU-data-Format/CLIF_Proning_Incidence_Severe_ARF), and the respiratory-support waterfall and encounter stitching come from [clifpy](https://github.com/Common-Longitudinal-ICU-data-Format/clifpy) (Apache-2.0).

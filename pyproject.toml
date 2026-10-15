@@ -2,6 +2,8 @@
 name = "clif-dashboards"
 version = "0.1.0"
 description = "Server-backed ICU quality dashboards over a CLIF 2.1 database"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "clifpy==2.1.0",
