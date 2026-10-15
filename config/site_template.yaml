@@ -1,0 +1,13 @@
+# Copy to config/<site>.yaml and fill in. Relative paths resolve from this folder.
+clif_dir: /path/to/clif/tables        # folder with clif_patient.parquet, clif_adt.parquet, ...
+filetype: parquet                     # only parquet is supported
+file_prefix: clif_                    # tables are <prefix><table>.parquet
+site_name: My Hospital ICUs           # shown in the dashboard header
+site_timezone: America/Chicago        # days and months are grouped in this zone (CLIF stores UTC)
+start_date:                           # optional analysis window, site-local dates (YYYY-MM-DD)
+end_date:
+decisions_file: decisions.yaml        # metric definitions; copy and edit to change a site's choices
+output_dir: ../output/my_site         # built tables and staged data: PHI, keep inside the institution
+encounters_per_chunk: 2000            # phase A chunk size (respiratory_support only)
+cohort_encounters_per_chunk: 300      # phase B chunk size (all large tables); lower it if workers run out of memory
+workers: 4                            # parallel worker processes
