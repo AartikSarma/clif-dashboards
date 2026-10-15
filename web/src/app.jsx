@@ -718,6 +718,7 @@ function Quality({ F }) {
       if (dq.sat_documented_rows === 0) notes.push("No documented SAT assessments (sat_delivery_pass_fail): the SAT measure relies on the EHR phenotype only.");
       if (dq.prone_position_rows < 5) notes.push(`Only ${dq.prone_position_rows} prone position row(s) in the position table: proning measures will be near zero or empty.`);
       if (dq.semi_prone_names.length) notes.push(`Position names mapped to prone that contain "semi": ${dq.semi_prone_names.join(", ")}. Review the mCIDE mapping.`);
+      if (dq.respiratory_rows_without_time) notes.push(`${dq.respiratory_rows_without_time.toLocaleString()} respiratory_support rows have no recorded_dttm and were left out of the ventilator timeline.`);
       if (dq.icu_rows_without_location_type) notes.push(`${dq.icu_rows_without_location_type} ICU ADT rows have no location_type: they appear as "ICU (type not mapped)".`);
       if (data.n_episodes && data.n_with_height / data.n_episodes < 0.9) notes.push(`Height is missing for ${data.n_episodes - data.n_with_height} of ${data.n_episodes} episodes, so their ventilator hours drop out of the LTVV denominator.`);
       return (

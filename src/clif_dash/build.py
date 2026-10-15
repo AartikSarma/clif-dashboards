@@ -77,6 +77,17 @@ def assign_chunks(encounter_blocks, encounters_per_chunk: int) -> pd.DataFrame:
     return pd.DataFrame({"encounter_block": blocks, "chunk": np.arange(len(blocks)) // encounters_per_chunk})
 
 
+def drop_untimed_rows(respiratory_support: pd.DataFrame) -> pd.DataFrame:
+    """Drop respiratory_support rows with no recorded_dttm before the waterfall.
+
+    clifpy's waterfall carries such rows through with a missing time, and later
+    time-ordered joins (proning's ABG-to-ventilator match, timelines) then fail.
+    A setting with no time cannot be placed on the timeline, so dropping it loses
+    nothing; data_quality reports how many rows the site has.
+    """
+    return respiratory_support[respiratory_support["recorded_dttm"].notna()].reset_index(drop=True)
+
+
 # --------------------------------------------------------------------------- #
 # Phase A: waterfall, IMV episodes, cohort exclusions (per chunk)
 # --------------------------------------------------------------------------- #
@@ -90,7 +101,8 @@ def phase_a_chunk(cfg: SiteConfig, chunk: int, fio2_percent: bool) -> dict:
     adt = pd.read_parquet(work / "adt.parquet")
     adt = adt[adt["encounter_block"].isin(chunk_blocks)].reset_index(drop=True)
 
-    tables = {"respiratory_support": stage.load_staged_chunk(cfg, "phase_a", "respiratory_support", chunk)}
+    tables = {"respiratory_support": drop_untimed_rows(
+        stage.load_staged_chunk(cfg, "phase_a", "respiratory_support", chunk))}
     outliers = clif_io.apply_outliers(tables, log=lambda m: None, fio2_percent=fio2_percent)
     waterfall_fn, _, _ = clif_io.clifpy_functions()
     waterfall = prep.waterfall(tables, mapping, waterfall_fn)
@@ -211,6 +223,8 @@ def data_quality(con, cfg: SiteConfig) -> dict:
     return {
         "row_counts": row_counts,
         "semi_prone_names": semi_prone,
+        "respiratory_rows_without_time": scalar(
+            f"SELECT count(*) FROM {path('respiratory_support')} WHERE recorded_dttm IS NULL"),
         "icu_rows_without_location_type": scalar(
             f"SELECT count(*) FROM {path('adt')} WHERE lower(location_category) = 'icu' AND location_type IS NULL"),
         "prone_position_rows": prone_rows,
