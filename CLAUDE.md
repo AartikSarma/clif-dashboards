@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project serves ICU quality-improvement dashboards for UCSF from the site's CLIF 2.1 database (80K+ ICU admissions). It derives from the collaborator draft at https://github.com/cag-lab/clif-icu-quality-dashboard ("upstream", commit `b3cdf29`), which computes respiratory-failure quality measures and writes one self-contained HTML file. That design does not scale to UCSF, so this repo splits it into a batch build and a server that computes report pieces on request.
 
-Settled decisions: Python throughout; it runs on the maintainer's laptop for now, with UCSF hosting possible later; aggregation runs on the server, never in the browser. The license is undecided (the maintainer has asked the upstream author about relicensing); until then the project stays internal, and code derived from upstream is GPL-3.0-or-later.
+Settled decisions: Python throughout; it runs on the maintainer's laptop for now, with UCSF hosting possible later; aggregation runs on the server, never in the browser. Licensed GPL-3.0-or-later, matching upstream; the repository is private on GitHub and shared only with collaborators.
 
 ## Commands
 
