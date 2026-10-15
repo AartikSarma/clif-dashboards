@@ -1,0 +1,12 @@
+# Built tables, dashboards, and API caches carry hospitalization IDs and dates: never commit them.
+/output/
+/dist/
+*.parquet
+*.duckdb
+dashboard_data.json
+
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
