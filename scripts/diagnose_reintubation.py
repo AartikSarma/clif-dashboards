@@ -35,13 +35,16 @@ def count(n: int) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
+    parser.add_argument("--show-device-names", action="store_true",
+                        help="also list the site's device_name strings; review them locally before sharing, "
+                             "since free-text entries can carry identifying details")
     args = parser.parse_args()
     stage_dir = load_config(args.config).stage_dir
 
     runs = pd.read_parquet(stage_dir / "runs_a.parquet").sort_values(["encounter_block", "run_start"])
     runs["next_start"] = runs.groupby("encounter_block")["run_start"].shift(-1)
     ended = runs[runs["ended_by_device_change"] & runs["next_device"].ne("trach collar")].copy()
-    ended["gap_h"] = (ended["next_start"] - ended["run_end"]) / pd.Timedelta(hours=1)
+    ended["gap_h"] = (ended["next_start"] - ended["run_end"]).dt.total_seconds() / 3600
     back_within_48 = ended[ended["gap_h"] <= 48]
 
     print(f"IMV runs ending in a move to a non-IMV device (not trach collar): {count(len(ended))}")
@@ -56,21 +59,48 @@ def main() -> None:
     for device, n in ended["next_device"].fillna("(missing)").value_counts().items():
         print(f"  {device:<20} {count(int(n)):>8}")
 
-    waterfall = pd.concat([pd.read_parquet(f, columns=["encounter_block", "recorded_dttm", "is_scaffold"])
+    columns = ["encounter_block", "recorded_dttm", "is_scaffold", "device_category", "device_name", "mode_category",
+               "tidal_volume_set", "peep_set"]
+    waterfall = pd.concat([pd.read_parquet(f, columns=columns)
                            for f in glob.glob(str(stage_dir / "waterfall" / "*.parquet"))])
     by_block = {k: g for k, g in waterfall.groupby("encounter_block")}
-    charted = []
+    charted, first_rows = [], []
     for row in back_within_48.itertuples():
         g = by_block.get(row.encounter_block)
         if g is None:
             continue
         gap = g[(g["recorded_dttm"] >= row.run_end) & (g["recorded_dttm"] < row.next_start)]
-        charted.append(int((~gap["is_scaffold"]).sum()))
+        real = gap[~gap["is_scaffold"]]
+        charted.append(int(len(real)))
+        if len(real):
+            first = real.iloc[0]
+            first_rows.append({"short_gap": row.gap_h <= 2, "device_category": first["device_category"],
+                               "device_name": first["device_name"], "mode_category": first["mode_category"],
+                               "vent_settings": pd.notna(first["tidal_volume_set"]) or pd.notna(first["mode_category"])})
     charted = pd.Series(charted)
+    first_rows = pd.DataFrame(first_rows)
     print("\nCharted (non-scaffold) non-IMV rows between the 'extubation' and the return to IMV:")
     for label, n in [("1 row", (charted == 1).sum()), ("2 rows", (charted == 2).sum()),
                      ("3 or more", (charted >= 3).sum())]:
         print(f"  {label:<10} {count(int(n)):>8}  ({n / max(len(charted), 1):.0%})")
+
+    if first_rows.empty:
+        return
+    for short, label in [(True, "back on IMV within 2 h"), (False, "back on IMV after 2-48 h")]:
+        part = first_rows[first_rows["short_gap"] == short]
+        if part.empty:
+            continue
+        print(f"\nFirst charted non-IMV row, {label} ({count(len(part))}):")
+        print(f"  rows that still carry a ventilator mode or set tidal volume: {count(int(part['vent_settings'].sum()))} "
+              (f"({part['vent_settings'].mean():.0%})" if len(part) >= SMALL_CELL else ""))
+        print("  device_category / mode_category:")
+        pairs = part.fillna("(missing)").groupby(["device_category", "mode_category"]).size().sort_values(ascending=False)
+        for (device, mode), n in pairs.head(12).items():
+            print(f"    {device:<16} {mode:<36} {count(int(n)):>8}")
+        if args.show_device_names:
+            print("  device_name (review before sharing):")
+            for name, n in part["device_name"].fillna("(missing)").value_counts().head(15).items():
+                print(f"    {str(name)[:50]:<50} {count(int(n)):>8}")
 
 
 if __name__ == "__main__":
