@@ -1,0 +1,19 @@
+{
+  "name": "clif-dashboards-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "React UI for the CLIF ICU quality dashboard server (adapted from cag-lab/clif-icu-quality-dashboard)",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "dependencies": {
+    "d3-scale": "^4.0.2",
+    "d3-shape": "^3.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}
