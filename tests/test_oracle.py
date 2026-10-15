@@ -90,6 +90,7 @@ def test_proning_rows_match(built):
 def test_data_quality_matches(built):
     _, _, summary = built
     ours, theirs = summary["data_quality"], ORACLE["data_quality"]
+    assert ours["respiratory_rows_without_time"] == 0  # not in upstream's summary; the synthetic data has none
     for key in ("row_counts", "semi_prone_names", "icu_rows_without_location_type", "prone_position_rows",
                 "sat_documented_rows", "sbt_documented_rows", "proning_model"):
         assert upstream_clean(ours[key]) == theirs[key], key
