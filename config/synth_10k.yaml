@@ -1,0 +1,14 @@
+# Synthetic CLIF 10k (~/Research/synthetic_clif/synth_clif_10k). Paths resolve from this folder.
+clif_dir: ~/Research/synthetic_clif/synth_clif_10k
+filetype: parquet
+file_prefix: clif_
+site_name: Synthetic CLIF 10k
+site_timezone: America/Los_Angeles   # matches the config that built tests/oracle
+start_date:
+end_date:
+decisions_file: decisions.yaml
+output_dir: ../output/synth_10k
+# Phase A chunks hold respiratory_support only; phase B chunks hold every large table
+encounters_per_chunk: 2000
+cohort_encounters_per_chunk: 300
+workers: 4

@@ -1,0 +1,11 @@
+clif_dir: /Users/aartiksarma/Research/synthetic_clif/synth_clif_10k
+filetype: parquet
+file_prefix: clif_
+site_name: Synthetic 10k
+site_timezone: America/Los_Angeles
+start_date:
+end_date:
+output_html: /private/tmp/claude-501/-Users-aartiksarma-Research-clif-dashboards/12f8df23-d280-442a-8858-f8b13eddb73f/scratchpad/upstream_out/dash.html
+decisions_file: /private/tmp/claude-501/-Users-aartiksarma-Research-clif-dashboards/12f8df23-d280-442a-8858-f8b13eddb73f/scratchpad/upstream/repo/decisions.yaml
+demo_mode:
+  reanchor_dates: false
