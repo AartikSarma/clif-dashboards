@@ -10,19 +10,15 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from clif_dash.build import build
-from clif_dash.config import load_config
 
 REPO = Path(__file__).resolve().parent.parent
 ORACLE = json.loads((REPO / "tests" / "oracle" / "upstream_synth10k.json").read_text())
-CONFIG = REPO / "config" / "synth_10k.yaml"
 FLOAT_TOLERANCE = 2e-4
 
 
@@ -63,16 +59,6 @@ def assert_records_match(ours: dict, theirs: dict, what: str) -> None:
             elif got != want:
                 mismatches.append((record_id, column, got, want))
     assert not mismatches, f"{what}: {len(mismatches)} mismatches, first: {mismatches[:10]}"
-
-
-@pytest.fixture(scope="session")
-def built(tmp_path_factory):
-    cfg = load_config(CONFIG)
-    if not cfg.clif_dir.exists():
-        pytest.skip(f"synthetic CLIF data not found at {cfg.clif_dir}")
-    cfg = replace(cfg, output_dir=tmp_path_factory.mktemp("synth_10k_build"))
-    output = build(cfg)
-    return cfg, output, json.loads((output / "summary.json").read_text())
 
 
 def test_funnels_match(built):

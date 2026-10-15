@@ -90,14 +90,21 @@ def source_columns(cfg: SiteConfig, table: str) -> list[str]:
     return pq.read_schema(path).names if path.exists() else []
 
 
-def load_staged_chunk(cfg: SiteConfig, stage_name: str, table: str, chunk: int) -> pd.DataFrame:
-    """Load one staged chunk in source-file order, shaped like the source table."""
+def load_staged_chunk(cfg: SiteConfig, stage_name: str, table: str, chunk: int,
+                      hospitalization_ids: list[str] | None = None) -> pd.DataFrame:
+    """Load one staged chunk in source-file order, shaped like the source table.
+
+    `hospitalization_ids` restricts the rows read (used for single-patient timelines).
+    """
     partition = cfg.stage_dir / stage_name / table / f"chunk={chunk}"
     files = sorted(partition.glob("*.parquet"))
     if not files:
         columns = source_columns(cfg, table)
         return clif_conventions(pd.DataFrame(columns=columns)) if columns else pd.DataFrame()
-    frame = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    row_filter = [("hospitalization_id", "in", list(hospitalization_ids))] if hospitalization_ids is not None else None
+    if row_filter and table in PATIENT_KEYED:
+        row_filter = None
+    frame = pd.concat([pd.read_parquet(f, filters=row_filter) for f in files], ignore_index=True)
     frame = frame.sort_values(SOURCE_ROW, kind="stable").drop(columns=[SOURCE_ROW]).reset_index(drop=True)
     if "chunk" in frame.columns:
         frame = frame.drop(columns=["chunk"])
