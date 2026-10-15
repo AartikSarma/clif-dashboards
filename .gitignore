@@ -11,3 +11,9 @@ __pycache__/
 node_modules/
 .DS_Store
 web/dist/
+
+# Site configs hold local paths; share only the template and the synthetic example
+config/*.yaml
+!config/site_template.yaml
+!config/synth_10k.yaml
+!config/decisions.yaml
