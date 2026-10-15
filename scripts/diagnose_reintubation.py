@@ -91,8 +91,9 @@ def main() -> None:
         if part.empty:
             continue
         print(f"\nFirst charted non-IMV row, {label} ({count(len(part))}):")
-        print(f"  rows that still carry a ventilator mode or set tidal volume: {count(int(part['vent_settings'].sum()))} "
-              (f"({part['vent_settings'].mean():.0%})" if len(part) >= SMALL_CELL else ""))
+        share = f" ({part['vent_settings'].mean():.0%})" if len(part) >= SMALL_CELL else ""
+        print(f"  rows that still carry a ventilator mode or set tidal volume: "
+              f"{count(int(part['vent_settings'].sum()))}{share}")
         print("  device_category / mode_category:")
         pairs = part.fillna("(missing)").groupby(["device_category", "mode_category"]).size().sort_values(ascending=False)
         for (device, mode), n in pairs.head(12).items():
