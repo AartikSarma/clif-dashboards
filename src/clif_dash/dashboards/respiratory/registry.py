@@ -6,32 +6,9 @@ which columns form each measure and which rows count as having missed it.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from typing import Callable
+from dataclasses import replace
 
-import pandas as pd
-
-MissedRule = Callable[[pd.DataFrame], pd.Series]
-
-
-@dataclass(frozen=True)
-class Metric:
-    id: str
-    source: str                      # "episodes" or "proning"
-    kind: str                        # "ratio", "mean" or "median"
-    numerator: str | None = None     # ratio numerator column, or the mean/median column
-    denominator: str | None = None   # ratio denominator column; None means one per row
-    den_label: str = "episodes"
-    expected: str | None = None      # column with each row's expected probability (O/E)
-    extra: tuple[str, ...] = ()      # further one-per-row ratios shown beside the headline
-    parts: tuple[tuple[str, str], ...] = ()  # (numerator column, label) sharing the denominator
-    needs: tuple[str, ...] = ()      # completeness flags this measure depends on
-    missed: MissedRule = field(default=lambda rows: pd.Series(False, index=rows.index), compare=False)
-
-    def public(self) -> dict:
-        return {"id": self.id, "source": self.source, "kind": self.kind, "numerator": self.numerator,
-                "denominator": self.denominator, "denLabel": self.den_label, "oe": self.expected,
-                "extra": list(self.extra), "parts": [list(p) for p in self.parts], "needs": list(self.needs)}
+from ...dashboard import Metric
 
 
 def _gt0(column):
@@ -88,7 +65,7 @@ COMPLETENESS = [
     ("has_rass", "RASS during IMV"), ("has_abg", "Arterial blood gas"),
 ]
 # Denominators whose units are independent enough for p-chart control limits
-INDEPENDENT_DENOMINATORS = {"episodes", "patients", "encounters", "extubations", "ICU transfers out"}
+INDEPENDENT_DENOMINATORS = frozenset({"episodes", "patients", "encounters", "extubations", "ICU transfers out"})
 
 
 def ltvv_column(threshold) -> str:

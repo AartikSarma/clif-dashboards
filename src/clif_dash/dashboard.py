@@ -1,0 +1,133 @@
+"""What a dashboard module gives the platform, and what the platform gives it.
+
+The platform (build.py, stage.py, server/) owns site configuration, encounter
+stitching, chunked staging, filtering, aggregation and the API. A dashboard
+module (src/clif_dash/dashboards/<id>/) exports one Dashboard object that says
+which CLIF tables it reads, how it builds its rows, and which measures the
+server aggregates from them. The platform calls the module only through it.
+"""
+from __future__ import annotations
+
+import resource
+import time
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+import numpy as np
+import pandas as pd
+
+from . import stage
+from .config import SiteConfig
+
+MissedRule = Callable[[pd.DataFrame], pd.Series]
+
+
+def log(message: str) -> None:
+    peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9  # bytes on macOS
+    print(f"[{time.strftime('%H:%M:%S')} | peak {peak_gb:.1f} GB] {message}", flush=True)
+
+
+def assign_chunks(encounter_blocks, encounters_per_chunk: int) -> pd.DataFrame:
+    blocks = np.sort(np.asarray(pd.unique(encounter_blocks)))
+    return pd.DataFrame({"encounter_block": blocks, "chunk": np.arange(len(blocks)) // encounters_per_chunk})
+
+
+# --------------------------------------------------------------------------- #
+# Build
+# --------------------------------------------------------------------------- #
+@dataclass
+class SiteBuild:
+    """The site as the platform hands it to a dashboard's build.
+
+    `encounters`, `mapping` and `adt` are stitched once for the whole site and
+    also written to the stage folder. `site_statistics` holds whatever the
+    dashboard's own site_statistics hook computed over whole source tables.
+    """
+    cfg: SiteConfig
+    con: Any                      # DuckDB connection
+    encounters: pd.DataFrame
+    mapping: pd.DataFrame
+    adt: pd.DataFrame
+    site_statistics: dict
+
+    def stage(self, table: str, chunk_map: pd.DataFrame, stage_name: str) -> int:
+        """Stage `table` rows for the encounters in `chunk_map` under stage/<stage_name>/<table>."""
+        return stage.stage_table(self.con, self.cfg, table, chunk_map, self.cfg.stage_dir / stage_name / table)
+
+    def run_chunks(self, chunk_function: Callable, chunks) -> list:
+        """Call chunk_function(cfg, chunk, site_statistics) for every chunk, in worker processes.
+
+        Workers are spawned, so chunk_function must be a module-level function.
+        Any statistic over a whole table belongs in site_statistics, never in a
+        chunk: a chunk sees only its own encounters.
+        """
+        cfg, statistics = self.cfg, self.site_statistics
+        if cfg.workers <= 1:
+            return [chunk_function(cfg, c, statistics) for c in chunks]
+        with ProcessPoolExecutor(max_workers=cfg.workers) as pool:
+            return list(pool.map(chunk_function, [cfg] * len(chunks), chunks, [statistics] * len(chunks)))
+
+
+@dataclass
+class BuildResult:
+    """A dashboard's built rows, written to the output folder, and its part of summary.json."""
+    tables: dict[str, pd.DataFrame]                       # name -> rows, written as <name>.parquet
+    summary: dict = field(default_factory=dict)           # top-level summary keys (funnels)
+    meta: dict = field(default_factory=dict)              # added to summary["meta"]
+    data_quality: dict = field(default_factory=dict)      # added to summary["data_quality"]
+
+
+# --------------------------------------------------------------------------- #
+# Measures
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Metric:
+    id: str
+    source: str                      # which row table: "episodes" or "proning"
+    kind: str                        # "ratio", "mean" or "median"
+    numerator: str | None = None     # ratio numerator column, or the mean/median column
+    denominator: str | None = None   # ratio denominator column; None means one per row
+    den_label: str = "episodes"
+    expected: str | None = None      # column with each row's expected probability (O/E)
+    extra: tuple[str, ...] = ()      # further one-per-row ratios shown beside the headline
+    parts: tuple[tuple[str, str], ...] = ()  # (numerator column, label) sharing the denominator
+    needs: tuple[str, ...] = ()      # completeness flags this measure depends on
+    missed: MissedRule = field(default=lambda rows: pd.Series(False, index=rows.index), compare=False)
+
+    def public(self) -> dict:
+        return {"id": self.id, "source": self.source, "kind": self.kind, "numerator": self.numerator,
+                "denominator": self.denominator, "denLabel": self.den_label, "oe": self.expected,
+                "extra": list(self.extra), "parts": [list(p) for p in self.parts], "needs": list(self.needs)}
+
+
+# --------------------------------------------------------------------------- #
+# The contract
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Dashboard:
+    id: str
+    title: str
+    # CLIF tables read beyond patient, hospitalization and adt (which every dashboard gets)
+    tables: tuple[str, ...]
+    required_tables: tuple[str, ...]
+    # Build hooks
+    site_statistics: Callable[[Any, SiteConfig], dict]   # (con, cfg): statistics over whole source tables
+    build: Callable[[SiteBuild], BuildResult]
+    data_quality: Callable[[Any, SiteConfig], dict]      # (con, cfg): counts over whole source tables
+    # Server
+    metrics: list[Metric]
+    domains: list[str]
+    strata: list[tuple[str, str]]
+    completeness: list[tuple[str, str]]
+    independent_denominators: frozenset[str]             # denominators that get p-chart limits
+    resolve: Callable                                    # (route_id, decisions, ltvv_thresholds) -> (metric, threshold, default)
+    detail: Callable | None = None                       # (store) -> builder with .build(row_id)
+
+    @property
+    def metrics_by_id(self) -> dict[str, Metric]:
+        return {m.id: m for m in self.metrics}
+
+    def missing_required_tables(self, cfg: SiteConfig) -> list[Path]:
+        return [cfg.table_path(t) for t in self.required_tables if not cfg.table_path(t).exists()]

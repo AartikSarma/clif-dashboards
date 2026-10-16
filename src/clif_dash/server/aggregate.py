@@ -11,7 +11,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from .registry import Metric
+from ..dashboard import Metric
 
 
 def _finite(value):

@@ -12,10 +12,10 @@ from functools import lru_cache
 
 import pandas as pd
 
-from .. import stage
-from ..upstream import clif_io, metrics, prep
-from ..upstream.timelines import timelines
-from .store import Store, jsonable
+from ... import stage
+from ...upstream import clif_io, metrics, prep
+from ...upstream.timelines import timelines
+from ...server.store import Store, jsonable
 
 TIMELINE_TABLES = ["vitals", "labs", "position", "patient_assessments", "medication_admin_continuous"]
 
@@ -25,6 +25,7 @@ class TimelineBuilder:
         self.store = store
         cfg = store.cfg
         work = cfg.stage_dir
+        self.paralytic_days = pd.read_parquet(cfg.output_dir / "paralytic_days.parquet")
         self.chunk_of_block = pd.read_parquet(work / "chunks_b.parquet").set_index("encounter_block")["chunk"]
         self.mapping = pd.read_parquet(work / "mapping.parquet")
         self.fio2_percent = bool(store.meta.get("fio2_recorded_as_percent", False))
@@ -57,7 +58,7 @@ class TimelineBuilder:
         waterfall = pd.read_parquet(cfg.stage_dir / "waterfall" / f"chunk_{chunk}.parquet",
                                     filters=[("encounter_block", "==", block)])
         waterfall = waterfall.drop(columns=["waterfall_row", "phase_a_chunk", "chunk"]).reset_index(drop=True)
-        days = self.store.paralytic_days
+        days = self.paralytic_days
         days = days[days["episode_id"] == episode_id]
         context = {
             "w": waterfall, "T": tables, "mapping": mapping, "pa_by": assessments_by_block, "iv": infusions,

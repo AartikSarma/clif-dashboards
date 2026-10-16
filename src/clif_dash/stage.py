@@ -20,14 +20,8 @@ import pandas as pd
 
 from .config import SiteConfig
 
-# Tables the respiratory quality metrics read, and the key that links each to an encounter
-HOSPITALIZATION_KEYED = [
-    "respiratory_support", "vitals", "labs", "position", "patient_assessments",
-    "medication_admin_continuous", "hospital_diagnosis",
-]
-PATIENT_KEYED = ["code_status"]
-ALL_TABLES = ["patient", "hospitalization", "adt", *HOSPITALIZATION_KEYED, *PATIENT_KEYED]
-REQUIRED_TABLES = {"patient", "hospitalization", "adt", "respiratory_support"}
+# Small tables read whole for every dashboard; each dashboard declares the rest
+ENCOUNTER_TABLES = ("patient", "hospitalization", "adt")
 SOURCE_ROW = "source_row"
 
 
@@ -58,9 +52,7 @@ def read_whole_table(cfg: SiteConfig, table: str) -> pd.DataFrame:
     """Read a small table (patient, hospitalization, adt) whole."""
     path = cfg.table_path(table)
     if not path.exists():
-        if table in REQUIRED_TABLES:
-            raise FileNotFoundError(f"Required CLIF table not found: {path}")
-        return pd.DataFrame()
+        raise FileNotFoundError(f"Required CLIF table not found: {path}")
     return clif_conventions(pd.read_parquet(path))
 
 
@@ -100,7 +92,8 @@ def load_staged_chunk(cfg: SiteConfig, stage_name: str, table: str, chunk: int,
                       hospitalization_ids: list[str] | None = None) -> pd.DataFrame:
     """Load one staged chunk in source-file order, shaped like the source table.
 
-    `hospitalization_ids` restricts the rows read (used for single-patient timelines).
+    `hospitalization_ids` restricts the rows read (used for single-patient timelines);
+    pass it only for tables that carry hospitalization_id.
     """
     partition = cfg.stage_dir / stage_name / table / f"chunk={chunk}"
     files = sorted(partition.glob("*.parquet"))
@@ -108,8 +101,6 @@ def load_staged_chunk(cfg: SiteConfig, stage_name: str, table: str, chunk: int,
         columns = source_columns(cfg, table)
         return clif_conventions(pd.DataFrame(columns=columns)) if columns else pd.DataFrame()
     row_filter = [("hospitalization_id", "in", list(hospitalization_ids))] if hospitalization_ids is not None else None
-    if row_filter and table in PATIENT_KEYED:
-        row_filter = None
     frame = pd.concat([pd.read_parquet(f, filters=row_filter) for f in files], ignore_index=True)
     frame = frame.sort_values(SOURCE_ROW, kind="stable").drop(columns=[SOURCE_ROW]).reset_index(drop=True)
     if "chunk" in frame.columns:

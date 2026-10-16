@@ -48,9 +48,11 @@ The server keeps the episode table in memory and computes each page's numbers un
 | Path | Purpose |
 | --- | --- |
 | `config/` | Site configs and `decisions.yaml` |
-| `src/clif_dash/build.py`, `stage.py` | Chunked build |
+| `src/clif_dash/build.py`, `stage.py` | Build platform: encounter stitching, chunked staging, summary |
+| `src/clif_dash/dashboard.py` | The contract between the platform and a dashboard module |
+| `src/clif_dash/dashboards/respiratory/` | The respiratory dashboard: its build phases, measures and timelines |
 | `src/clif_dash/upstream/` | The original metric logic, changed only where marked `clif_dashboards:` |
-| `src/clif_dash/server/` | API: filters, aggregation, on-demand timelines |
+| `src/clif_dash/server/` | API: filters, aggregation, routes |
 | `web/` | React interface, adapted from the original to fetch from the API |
 | `tests/` | Comparison with the original dashboard's output on synthetic data |
 

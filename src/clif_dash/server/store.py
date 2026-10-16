@@ -2,7 +2,7 @@
 
 The episode and proning tables are small (one row per IMV episode or proning
 patient), so the server keeps them as DataFrames. Timelines are not
-precomputed: timeline.py builds one from the staged chunk when it is asked for.
+precomputed: the respiratory dashboard's timeline.py builds one from the staged chunk when it is asked for.
 """
 from __future__ import annotations
 
@@ -72,7 +72,6 @@ class Store:
         self.proning = pd.read_parquet(output / "proning.parquet")
         if self.proning.empty:
             self.proning = pd.DataFrame(columns=["episode_id", "month"])
-        self.paralytic_days = pd.read_parquet(output / "paralytic_days.parquet")
         tz = cfg.site_timezone
         # Display rows: what the episode list, CSV download and timeline header show
         display = self.episodes.drop(columns=["encounter_block"]).copy()

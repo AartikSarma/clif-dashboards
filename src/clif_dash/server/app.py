@@ -16,10 +16,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import SiteConfig
+from ..dashboard import Dashboard, Metric
+from ..dashboards import DEFAULT_DASHBOARD
 from . import aggregate as agg
-from .registry import COMPLETENESS, DOMAINS, INDEPENDENT_DENOMINATORS, METRICS, METRICS_BY_ID, STRATA, Metric, resolve
 from .store import FILTER_FIELDS, Filters, Store, jsonable
-from .timeline import TimelineBuilder
 
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 EPISODE_PAGE_SIZE = 100
@@ -38,9 +38,11 @@ def parse_filters(request: Request) -> Filters:
     )
 
 
-def create_app(cfg: SiteConfig) -> FastAPI:
+def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> FastAPI:
     store = Store(cfg)
-    timeline_builder = TimelineBuilder(store)
+    detail_builder = dashboard.detail(store) if dashboard.detail else None
+    metrics, metrics_by_id, resolve = dashboard.metrics, dashboard.metrics_by_id, dashboard.resolve
+    strata, completeness_flags = dashboard.strata, dashboard.completeness
     ltvv_thresholds = store.meta["ltvv_thresholds"]
     app = FastAPI(title="CLIF ICU quality dashboard", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -59,9 +61,9 @@ def create_app(cfg: SiteConfig) -> FastAPI:
         return jsonable({
             "meta": store.meta, "decisions": store.decisions, "funnel": store.summary["funnel"],
             "proning_funnel": store.summary["proning_funnel"], "data_quality": store.summary["data_quality"],
-            "metrics": [m.public() for m in METRICS], "domains": DOMAINS,
-            "strata": [{"id": i, "label": label} for i, label in STRATA],
-            "completeness": [list(c) for c in COMPLETENESS],
+            "metrics": [m.public() for m in metrics], "domains": dashboard.domains,
+            "strata": [{"id": i, "label": label} for i, label in strata],
+            "completeness": [list(c) for c in completeness_flags],
             "filter_fields": [list(f) for f in FILTER_FIELDS], "filter_options": store.filter_options(),
             "n_episodes_total": int(len(store.episodes)), "small_cell_n": store.small_cell_n,
         })
@@ -71,21 +73,21 @@ def create_app(cfg: SiteConfig) -> FastAPI:
         episodes, proning = filtered(request)
         months = months_of(episodes, proning)
         tiles = {}
-        for metric in METRICS:
+        for metric in metrics:
             rows = rows_for(metric, episodes, proning)
             tiles[metric.id] = {"agg": agg.aggregate(metric, rows), "series": agg.monthly(metric, rows, months)}
         return jsonable({"n_episodes": len(episodes), "n_proning": len(proning), "months": months, "tiles": tiles})
 
     @app.get("/api/metric/{route_id}")
     def metric_page(route_id: str, request: Request, stratum: str = Query("unit")):
-        if stratum not in dict(STRATA):
+        if stratum not in dict(strata):
             raise HTTPException(400, f"unknown stratum {stratum}")
         episodes, proning = filtered(request)
         metric, threshold, default = resolve(route_id, store.decisions, ltvv_thresholds)
         rows = rows_for(metric, episodes, proning)
         months = sorted(rows["month"].dropna().unique().tolist())
         series = agg.monthly(metric, rows, months)
-        independent = metric.den_label in INDEPENDENT_DENOMINATORS
+        independent = metric.den_label in dashboard.independent_denominators
         groups = agg.by_group(metric, rows, stratum)
         top_keys = [g["key"] for g in groups[:6]]
         labels = rows[stratum].astype(object).where(rows[stratum].notna(), "Unknown") if len(rows) else rows[stratum]
@@ -99,7 +101,7 @@ def create_app(cfg: SiteConfig) -> FastAPI:
         parts = [{"key": k, "label": label, **agg.aggregate(Metric(metric.id, metric.source, "ratio", k, metric.denominator), rows)}
                  for k, label in metric.parts]
         completeness = [{"key": k, "label": label, "n": int(episodes[k].sum()), "total": int(len(episodes))}
-                        for k, label in COMPLETENESS if k in metric.needs]
+                        for k, label in completeness_flags if k in metric.needs]
         return jsonable({
             "metric": metric.public(), "threshold": threshold, "default_threshold": default,
             "route_id": f"ltvv@{threshold:g}" if threshold is not None else metric.id,
@@ -116,7 +118,7 @@ def create_app(cfg: SiteConfig) -> FastAPI:
         episodes, proning = filtered(request)
         unit_names = sorted(episodes["unit"].dropna().unique().tolist())
         table = []
-        for metric in METRICS:
+        for metric in metrics:
             rows = rows_for(metric, episodes, proning)
             cells = {g["key"]: g for g in agg.by_group(metric, rows, "unit", keys=unit_names)}
             table.append({"id": metric.id, "all": agg.aggregate(metric, rows), "cells": cells})
@@ -126,7 +128,7 @@ def create_app(cfg: SiteConfig) -> FastAPI:
                           search: str | None, sort: str, direction: int):
         episodes, proning = filtered(request)
         note, numerator_column, threshold = None, "ltvv_num", None
-        if metric_arg and metric_arg.split("@")[0] in METRICS_BY_ID:
+        if metric_arg and metric_arg.split("@")[0] in metrics_by_id:
             metric, threshold, _ = resolve(metric_arg, store.decisions, ltvv_thresholds)
             if threshold is not None:
                 numerator_column = metric.numerator
@@ -177,7 +179,7 @@ def create_app(cfg: SiteConfig) -> FastAPI:
 
     @app.get("/api/timeline/{episode_id}")
     def episode_timeline(episode_id: str):
-        series = timeline_builder.build(episode_id)
+        series = detail_builder.build(episode_id) if detail_builder else None
         if series is None:
             raise HTTPException(404, f"no episode {episode_id}")
         episode = store.episode_display.loc[episode_id].to_dict()
@@ -196,7 +198,7 @@ def create_app(cfg: SiteConfig) -> FastAPI:
         episodes, _ = filtered(request)
         unit_names = sorted(episodes["unit"].dropna().unique().tolist())
         completeness = []
-        for key, label in COMPLETENESS:
+        for key, label in completeness_flags:
             cells = {}
             for unit in [None, *unit_names]:
                 rows = episodes if unit is None else episodes[episodes["unit"] == unit]

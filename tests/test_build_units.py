@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from clif_dash.build import drop_untimed_rows
+from clif_dash.dashboards.respiratory.build import drop_untimed_rows
 from clif_dash.upstream import clif_io, prep
 
 SYNTHETIC = Path("~/Research/synthetic_clif/synth_clif_10k").expanduser()

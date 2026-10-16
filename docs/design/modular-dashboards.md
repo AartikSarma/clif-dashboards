@@ -1,6 +1,6 @@
 # Modular dashboards: design plan
 
-Branch: `modular-dashboards`. Status: proposal, nothing implemented.
+Branch: `modular-dashboards`. Status: Phase 0 done; Phases 1-3 proposed.
 
 ## Goal
 
@@ -29,25 +29,31 @@ The genuinely shared parts are encounter stitching, chunk assignment, `stage_tab
 
 ## Target layout
 
+The top-level `clif_dash` package is the platform; modules live under `clif_dash/dashboards/`. Phase 0 built the Python half of this:
+
 ```
 src/clif_dash/
-  platform/
-    config.py          site config; list of enabled dashboards
-    encounters.py      stitching, adults, ADT (built once per site)
-    stage.py           chunked staging, source-row order
-    build.py           driver: encounters, then each dashboard's phases
-    dashboard.py       the Dashboard contract below
-    server/            app factory, store, filters, aggregate, generic routes
+  config.py            site config
+  stage.py             chunked staging, source-row order
+  build.py             driver: encounters, site statistics, the dashboard's build, data quality, summary
+  dashboard.py         the Dashboard contract, SiteBuild, BuildResult, Metric
+  server/              app factory, store, filters, aggregate
+  upstream/            upstream's code, vendored; both layers import it
   dashboards/
+    __init__.py        DASHBOARDS by id, DEFAULT_DASHBOARD
     respiratory/
-      __init__.py      DASHBOARD = Dashboard(...)
-      build.py         phase A (waterfall, IMV episodes), phase B (metrics, proning), finish
-      registry.py      measures, domains, strata, completeness flags
-      detail.py        hourly timeline (today's server/timeline.py)
-      decisions.yaml
-      upstream/        moved verbatim from src/clif_dash/upstream
+      __init__.py      RESPIRATORY = Dashboard(...)
+      build.py         phase A (waterfall, IMV episodes), phase B (metrics, proning), whole-cohort steps
+      registry.py      measures, domains, strata, completeness flags, ltvv@ resolution
+      timeline.py      hourly timeline, the dashboard's detail view
+```
+
+Later phases add:
+
+```
 config/
-  platform.yaml        site-wide decisions: age_min, stitch_hours, time_zone, small_cell_n, outliers
+  platform.yaml        site-wide decisions: age_min, stitch_hours, time_zone, small_cell_n, outliers (Phase 1)
+src/clif_dash/dashboards/respiratory/decisions.yaml   (Phase 1)
 web/src/
   app.jsx              shell, dashboard picker, generic pages
   dashboards/
@@ -55,40 +61,42 @@ web/src/
     respiratory/Timeline.jsx
 ```
 
-`upstream/` imports only relative to itself (`from . import prep`), so moving the folder edits no line in it. That keeps the oracle comparison meaningful.
+`upstream/` stays where it is. The platform uses it too: encounter stitching (`prep.build_encounters`), clifpy loading, outlier removal and the Charlson index are site-wide steps, not respiratory ones. Moving it into the respiratory module would make the platform import from a module.
 
 ## The Dashboard contract
 
-A module exports one object. The platform calls its hooks and never imports module internals.
+A module exports one `Dashboard` object (`src/clif_dash/dashboard.py`). The platform calls it and imports nothing else from the module.
 
 ```python
 @dataclass(frozen=True)
 class Dashboard:
-    id: str                       # "respiratory": URL segment and output folder
+    id: str
     title: str
-    decisions_file: Path
-    tables: TableNeeds            # required and optional tables, keyed by hospitalization or patient
-    row_tables: dict[str, RowTable]   # e.g. {"episodes": RowTable(id_column="episode_id", unit="IMV episode"), "proning": ...}
-    site_statistics: Callable     # (con, cfg) -> dict: whole-table statistics computed once, passed to every chunk
-    cohort_chunk: Callable | None # phase A: find the cohort in one chunk; None means every adult encounter
-    measure_chunk: Callable       # phase B: compute rows for one chunk
-    finish: Callable              # whole-cohort steps (models fitted on the full cohort, funnels)
-    data_quality: Callable        # (con, cfg) -> dict, merged with the platform's row counts
+    tables: tuple[str, ...]            # CLIF tables read beyond patient, hospitalization, adt
+    required_tables: tuple[str, ...]
+    site_statistics: Callable          # (con, cfg) -> dict: statistics over whole source tables
+    build: Callable                    # (SiteBuild) -> BuildResult
+    data_quality: Callable             # (con, cfg) -> dict, merged with the platform's counts
     metrics: list[Metric]
     domains: list[str]
     strata: list[tuple[str, str]]
-    filter_fields: list[FilterField]  # added to the platform's hospital, unit, age band, sex, race/ethnicity
     completeness: list[tuple[str, str]]
-    detail: DetailBuilder | None  # optional per-row view (respiratory: the timeline)
+    independent_denominators: frozenset[str]
+    resolve: Callable                  # route id -> (metric, threshold, default)
+    detail: Callable | None = None     # (store) -> builder with .build(row_id); respiratory: timelines
 ```
+
+The platform stitches encounters, calls `site_statistics`, and hands the module a `SiteBuild`: the config, a DuckDB connection, the stitched encounters, mapping and ADT, the site statistics, and two helpers, `stage(table, chunk_map, stage_name)` and `run_chunks(function, chunks)`. The module's `build` returns a `BuildResult`: named row tables, which the platform writes as parquet, and its parts of `summary.json`.
 
 Three choices in this contract need stating.
 
-`site_statistics` turns the build's second invariant into a hook. Today the FiO2-recorded-as-percent test is the one statistic upstream computed over a whole table; it is a special case in `build.py`. Every module will have its own, and a module that computes one inside a chunk gets results that depend on chunk size. Making it a named hook puts the rule where the next author will see it.
+The module orchestrates its own phases. An earlier draft had separate cohort, measure and finish hooks, but respiratory's work between phases (re-sorting the waterfall into phase B chunks) fits none of them, and a stewardship dashboard needs only one phase. The platform supplies staging and worker pools; the module decides how many passes to make.
 
-`row_tables` replaces the word "episode" in the platform. Respiratory rows are IMV episodes; sepsis rows will be encounters; stewardship rows will be patient-days or unit-months. The platform asks the module for the table name, its ID column and the label to print.
+`site_statistics` turns the build's second invariant into a hook. The FiO2-recorded-as-percent test is the one statistic upstream computed over a whole table. A module that computes such a statistic inside a chunk gets results that depend on chunk size, so the platform computes these before any chunk runs and passes them to every chunk function. `run_chunks` spawns worker processes, so chunk functions must be module-level functions.
 
-Decisions load in two layers. The platform reads `config/platform.yaml`, and the loader merges its entries into each module's `shared:` list before any module code sees them. The respiratory module therefore receives the same `decisions` dict it receives today, and the "How this is calculated" panel still shows the site-wide choices.
+Decisions will load in two layers. In Phase 1 the platform will read `config/platform.yaml` and merge its entries into each module's `shared:` list before module code sees them, so the respiratory module receives the same `decisions` dict as now and the "How this is calculated" panel still shows the site-wide choices. Until then the platform reads `age_min` and `stitch_hours` from the one `decisions.yaml`. The split waits for Phase 1 because it changes the site YAML's `decisions_file` key, and Phase 1 changes the site YAML anyway.
+
+Phase 1 also adds row-table descriptions (ID column and unit label for each table), which replace the word "episode" in the server. Respiratory rows are IMV episodes; sepsis rows will be encounters; stewardship rows will be patient-days.
 
 ## Outputs
 
@@ -107,9 +115,9 @@ Each dashboard stages its own tables for its own cohort, so two dashboards that 
 
 ## Phases
 
-**Phase 0: extract the respiratory module, change no behavior.** Move code into the layout above and write the contract, keeping today's routes and output paths. The acceptance test is that `test_oracle.py` and `test_server.py` pass with their assertions untouched; only import paths and the build fixture's output path may change. Nothing in this phase may move a number. Commit the `upstream/` move on its own, so `git log --follow` shows it as a pure rename.
+**Phase 0 (done): extract the respiratory module, change no behavior.** The build's respiratory phases, the measure registry and the timeline builder moved into `dashboards/respiratory/`; `build.py`, `stage.py` and `server/` lost their respiratory table lists and measures. Routes, output paths and the site YAML are unchanged. `test_oracle.py` and `test_server.py` pass unmodified (one import line in `test_build_units.py` moved with `drop_untimed_rows`), and the three parquet outputs and `summary.json` (less its timestamp) are identical to a build from `main`. Still respiratory-shaped and deliberately left for later phases: `Store`'s `episodes` and `proning` attributes, `DERIVED_SORT`, the `ltvv@` cases in `app.py`, and the `trach` and `code_status` filters.
 
-**Phase 1: namespace the API and UI.** Add the dashboard prefix to routes and hash URLs, `/api/dashboards`, the landing page, and the `--dashboard` option on `build` and `serve`. `test_server.py` changes only its URLs. Write a stub second module (one trivial measure over all ICU encounters) to prove that two dashboards build and serve side by side, and delete it once a real module replaces it.
+**Phase 1: namespace the API and UI.** Add the dashboard prefix to routes and hash URLs, `/api/dashboards`, the landing page, the `--dashboard` option on `build` and `serve`, per-dashboard output folders, the decisions split, and row-table descriptions. `test_server.py` changes only its URLs. Write a stub second module (one trivial measure over all ICU encounters) to prove that two dashboards build and serve side by side, and delete it once a real module replaces it.
 
 **Phase 2: generalize what the second module will need.** Four changes, each with its own tests:
 
