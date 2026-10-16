@@ -38,10 +38,16 @@ def connect() -> duckdb.DuckDBPyConnection:
 
 
 def clif_conventions(frame: pd.DataFrame) -> pd.DataFrame:
-    """Same coercions upstream applied on load: UTC datetimes, string IDs."""
+    """Same coercions upstream applied on load: UTC datetimes, string IDs.
+
+    Every datetime also gets one resolution, microseconds. Sites store CLIF
+    datetimes as parquet timestamps (read back as microseconds) or as text, which
+    pandas parses to nanoseconds; time-ordered joins across tables (proning's
+    ABG-to-ventilator match) refuse keys of different resolutions.
+    """
     for column in frame.columns:
         if column.endswith("_dttm"):
-            frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce")
+            frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce").dt.as_unit("us")
     for column in ("hospitalization_id", "patient_id"):
         if column in frame.columns:
             frame[column] = frame[column].astype(str)

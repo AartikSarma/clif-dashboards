@@ -106,6 +106,7 @@ def phase_a_chunk(cfg: SiteConfig, chunk: int, fio2_percent: bool) -> dict:
     outliers = clif_io.apply_outliers(tables, log=lambda m: None, fio2_percent=fio2_percent)
     waterfall_fn, _, _ = clif_io.clifpy_functions()
     waterfall = prep.waterfall(tables, mapping, waterfall_fn)
+    waterfall["recorded_dttm"] = waterfall["recorded_dttm"].dt.as_unit("us")  # same resolution as every staged table
     runs = prep.imv_runs(waterfall)
     funnel = {"encounters_with_imv": 0, "imv_episodes": 0, "not_icu": 0, "outside_intubation": 0, "outside_window": 0}
     if runs.empty:

@@ -28,3 +28,18 @@ def test_untimed_ventilator_rows_do_not_reach_the_waterfall():
 
     guarded = prep.waterfall({"respiratory_support": drop_untimed_rows(rows)}, mapping, waterfall_fn)
     assert guarded["recorded_dttm"].notna().all()
+
+
+def test_datetimes_share_one_resolution_however_stored():
+    """Text datetimes parse to nanoseconds and parquet timestamps load as microseconds;
+    proning's merge_asof between labs and the waterfall fails unless they match."""
+    from clif_dash.stage import clif_conventions
+
+    as_text = clif_conventions(pd.DataFrame({"lab_result_dttm": ["2022-06-24 13:18:00+0000", None]}))
+    as_nanoseconds = clif_conventions(pd.DataFrame(
+        {"recorded_dttm": pd.to_datetime(["2022-06-24 12:00:00"], utc=True).as_unit("ns")}))
+    assert str(as_text["lab_result_dttm"].dtype) == "datetime64[us, UTC]"
+    assert str(as_nanoseconds["recorded_dttm"].dtype) == "datetime64[us, UTC]"
+    joined = pd.merge_asof(as_text.dropna(), as_nanoseconds, left_on="lab_result_dttm",
+                           right_on="recorded_dttm", direction="backward")
+    assert joined["recorded_dttm"].notna().all()
