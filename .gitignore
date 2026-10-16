@@ -17,3 +17,9 @@ config/*.yaml
 !config/site_template.yaml
 !config/synth_10k.yaml
 !config/decisions.yaml
+
+# Claude working documents: kept locally, not shared
+CLAUDE.md
+CLAUDE.local.md
+TODO.md
+.claude/
