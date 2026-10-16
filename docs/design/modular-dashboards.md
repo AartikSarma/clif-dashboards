@@ -8,9 +8,9 @@ The repository serves one dashboard, respiratory failure on invasive ventilation
 
 The respiratory dashboard becomes the first module. Its numbers must not move while it does.
 
-## What is platform and what is respiratory today
+## Where respiratory assumptions lived before Phase 0
 
-Most of the code is already generic in shape, but respiratory assumptions run through files that look like platform code. These are the places a second dashboard would collide with:
+Most of the code was already generic in shape, but respiratory assumptions ran through files that looked like platform code. Phase 0 removed those in `stage.py`, `build.py`, `registry.py` and `timeline.py`; the rest remain for Phases 1 and 2.
 
 | File | Respiratory assumptions |
 |---|---|
