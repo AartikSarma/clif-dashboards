@@ -1,6 +1,6 @@
 # Modular dashboards: design plan
 
-Branch: `modular-dashboards`. Status: Phase 0 done; Phases 1-3 proposed.
+Branch: `modular-dashboards`. Status: Phases 0 and 1 done; Phases 2 and 3 proposed.
 
 ## Goal
 
@@ -29,15 +29,21 @@ The genuinely shared parts are encounter stitching, chunk assignment, `stage_tab
 
 ## Target layout
 
-The top-level `clif_dash` package is the platform; modules live under `clif_dash/dashboards/`. Phase 0 built the Python half of this:
+The top-level `clif_dash` package is the platform; modules live under `clif_dash/dashboards/`. After Phase 1:
 
 ```
+config/
+  site_template.yaml   site config: paths, dashboards list, decisions folder
+  decisions/
+    platform.yaml      site-wide decisions: age_min, stitch_hours, outliers, time_zone, small_cell_n
+    respiratory.yaml   the respiratory dashboard's decisions
+    icu_stays.yaml     the platform-test dashboard's decisions
 src/clif_dash/
-  config.py            site config
+  config.py            site config, SiteConfig.bind(dashboard), two-layer decisions
   stage.py             chunked staging, source-row order
-  build.py             driver: encounters, site statistics, the dashboard's build, data quality, summary
-  dashboard.py         the Dashboard contract, SiteBuild, BuildResult, Metric
-  server/              app factory, store, filters, aggregate
+  build.py             driver: stitch once, then per dashboard: site statistics, build, data quality, summary
+  dashboard.py         the Dashboard contract, RowTable, SiteBuild, BuildResult, Metric
+  server/              app factory (a router per dashboard), store, filters, aggregate
   upstream/            upstream's code, vendored; both layers import it
   dashboards/
     __init__.py        DASHBOARDS by id, DEFAULT_DASHBOARD
@@ -46,20 +52,13 @@ src/clif_dash/
       build.py         phase A (waterfall, IMV episodes), phase B (metrics, proning), whole-cohort steps
       registry.py      measures, domains, strata, completeness flags, ltvv@ resolution
       timeline.py      hourly timeline, the dashboard's detail view
-```
-
-Later phases add:
-
-```
-config/
-  platform.yaml        site-wide decisions: age_min, stitch_hours, time_zone, small_cell_n, outliers (Phase 1)
-src/clif_dash/dashboards/respiratory/decisions.yaml   (Phase 1)
+    icu_stays/
+      __init__.py      platform test: one row per adult encounter with ICU time
 web/src/
-  app.jsx              shell, dashboard picker, generic pages
-  dashboards/
-    index.js           id -> { Detail component }
-    respiratory/Timeline.jsx
+  app.jsx              dashboard loader and landing page, shell, generic pages, respiratory list and timeline
 ```
+
+Decision files stay in `config/` rather than moving into the package, because sites copy and edit them. The respiratory list columns and timeline stay in `app.jsx`, registered by dashboard id (`LISTS`, the `detail` flag in `meta`); splitting them into `web/src/dashboards/` can wait until a second dashboard brings its own.
 
 `upstream/` stays where it is. The platform uses it too: encounter stitching (`prep.build_encounters`), clifpy loading, outlier removal and the Charlson index are site-wide steps, not respiratory ones. Moving it into the respiratory module would make the platform import from a module.
 
@@ -83,6 +82,7 @@ class Dashboard:
     completeness: list[tuple[str, str]]
     independent_denominators: frozenset[str]
     resolve: Callable                  # route id -> (metric, threshold, default)
+    row_tables: tuple[RowTable, ...]   # primary first: name, ID column, unit label
     detail: Callable | None = None     # (store) -> builder with .build(row_id); respiratory: timelines
 ```
 
@@ -94,30 +94,31 @@ The module orchestrates its own phases. An earlier draft had separate cohort, me
 
 `site_statistics` turns the build's second invariant into a hook. The FiO2-recorded-as-percent test is the one statistic upstream computed over a whole table. A module that computes such a statistic inside a chunk gets results that depend on chunk size, so the platform computes these before any chunk runs and passes them to every chunk function. `run_chunks` spawns worker processes, so chunk functions must be module-level functions.
 
-Decisions will load in two layers. In Phase 1 the platform will read `config/platform.yaml` and merge its entries into each module's `shared:` list before module code sees them, so the respiratory module receives the same `decisions` dict as now and the "How this is calculated" panel still shows the site-wide choices. Until then the platform reads `age_min` and `stitch_hours` from the one `decisions.yaml`. The split waits for Phase 1 because it changes the site YAML's `decisions_file` key, and Phase 1 changes the site YAML anyway.
+Decisions load in two layers. A config bound to a dashboard reads `config/decisions/platform.yaml`, then the dashboard's own file, and puts the site-wide entries first under `shared:`, so the respiratory module receives the same decisions as before the split and the "How this is calculated" panel still shows the site-wide choices. A site config names the folder with `decisions_dir` and may point any file elsewhere under `decisions:`. The old `decisions_file` key keeps working: an existing file serves as the respiratory file, and any site-wide entry in it must match `platform.yaml` or the build stops and names it; the old shipped path falls back to the defaults with a note; any other missing path is an error. A dashboard file cannot change a site-wide value, because encounters are stitched once for every dashboard.
 
-Phase 1 also adds row-table descriptions (ID column and unit label for each table), which replace the word "episode" in the server. Respiratory rows are IMV episodes; sepsis rows will be encounters; stewardship rows will be patient-days.
+Row tables replace the word "episode" in the server. Each names its file, ID column and unit ("IMV episode", "ICU stay"); the first is the primary table, whose rows the list page shows and the detail view opens. Any other table must carry the primary table's ID column. Respiratory rows are IMV episodes; sepsis rows will be encounters; stewardship rows will be patient-days.
 
 ## Outputs
 
 ```
 output/<site>/
-  encounters/          encounters, mapping, adt (shared by all dashboards)
   respiratory/         episodes.parquet, proning.parquet, paralytic_days.parquet, summary.json, stage/
-  sepsis/              ...
+  icu_stays/           stays.parquet, summary.json, stage/
 ```
 
-Each dashboard stages its own tables for its own cohort, so two dashboards that both read `vitals` stage it twice. That costs build time, not correctness, and a shared staging cache can come later if builds get slow.
+One `build` invocation stitches encounters once and builds every dashboard in the site's `dashboards:` list (or those named with `--dashboard`). Each dashboard keeps its own copy of the stitched encounters, mapping and ADT in its stage folder, because its detail view reads the mapping it was built with; a shared folder would let a later build of one dashboard, on changed source data, silently break another's timelines. Each dashboard also stages its own tables for its own cohort, so two dashboards that both read `vitals` stage it twice. That costs build time, not correctness, and a shared staging cache can come later if builds get slow.
 
 ## API and UI
 
-`/api/dashboards` lists the dashboards whose builds exist. Every current route moves under a prefix: `/api/{dashboard}/meta`, `/overview`, `/metric/{id}`, `/units`, `/rows/{table}`, `/rows/{table}.csv`, `/detail/{row_id}`, `/quality`. The UI's hash routes gain the same segment (`#/respiratory/metric/ltvv@7`), the header title comes from `meta`, and a landing page lists the dashboards. The filter rail already builds itself from `meta.filter_fields`; it only needs the module's extra fields. A dashboard with no `detail` builder gets no detail page.
+`/api/dashboards` lists the dashboards whose builds exist. Every route sits under a prefix: `/api/{dashboard}/meta`, `/overview`, `/metric/{id}`, `/units`, `/rows`, `/rows.csv`, `/detail/{row_id}`, `/quality`. `/rows` lists the primary table. The UI's hash routes carry the same segment (`#/respiratory/metric/ltvv@7`); a hash without one, from an old bookmark, gets the first dashboard's id. The header title and page labels come from `meta`, and a landing page lists the dashboards when there are several. The filter rail offers only the shared filters the dashboard's rows carry. A dashboard with no `detail` builder gets no Timeline tab.
+
+`/overview` counts each table as `n_<table>`, which keeps the `n_episodes` and `n_proning` keys `test_server.py` reads. `/rows` still returns `ltvv_column` and `ltvv_threshold`; Phase 2 replaces them with the sorting and threshold work. Respiratory-specific page copy also remains in the UI (the data-quality notes, the observed/expected explanations); it shows only when a dashboard's data carry those fields.
 
 ## Phases
 
 **Phase 0 (done): extract the respiratory module, change no behavior.** The build's respiratory phases, the measure registry and the timeline builder moved into `dashboards/respiratory/`; `build.py`, `stage.py` and `server/` lost their respiratory table lists and measures. Routes, output paths and the site YAML are unchanged. `test_oracle.py` and `test_server.py` pass unmodified (one import line in `test_build_units.py` moved with `drop_untimed_rows`), and the three parquet outputs and `summary.json` (less its timestamp) are identical to a build from `main`. Still respiratory-shaped and deliberately left for later phases: `Store`'s `episodes` and `proning` attributes, `DERIVED_SORT`, the `ltvv@` cases in `app.py`, and the `trach` and `code_status` filters.
 
-**Phase 1: namespace the API and UI.** Add the dashboard prefix to routes and hash URLs, `/api/dashboards`, the landing page, the `--dashboard` option on `build` and `serve`, per-dashboard output folders, the decisions split, and row-table descriptions. `test_server.py` changes only its URLs. Write a stub second module (one trivial measure over all ICU encounters) to prove that two dashboards build and serve side by side, and delete it once a real module replaces it.
+**Phase 1 (done): namespace the API and UI.** Per-dashboard output folders, the `dashboards:` list and `--dashboard` on `build` and `serve`; the decisions split; a router per dashboard under `/api/{id}`; row-table descriptions and a store that loads whatever tables a dashboard declares; `icu_stays`, a platform-test dashboard built from encounters and ADT alone; and a UI that routes by dashboard. `test_server.py` changed only its URLs, the respiratory outputs still match the Phase 0 baseline (apart from the order of shared decisions and one changelog entry), and new tests cover the decisions rules and two dashboards served side by side. Both dashboards were checked in a browser on the synthetic build. Delete `icu_stays` once a real second dashboard replaces it.
 
 **Phase 2: generalize what the second module will need.** Four changes, each with its own tests:
 

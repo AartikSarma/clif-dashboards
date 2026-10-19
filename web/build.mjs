@@ -13,7 +13,7 @@ writeFileSync(join(dist, "index.html"), `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ICU Respiratory Failure Quality</title>
+<title>CLIF ICU quality dashboards</title>
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>

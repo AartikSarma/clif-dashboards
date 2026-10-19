@@ -1,6 +1,7 @@
 // ICU quality dashboard UI. Adapted from cag-lab/clif-icu-quality-dashboard (b3cdf29):
 // the pages and charts are upstream's; data now come from the API (src/clif_dash/server),
-// which filters and aggregates on the server, so the browser never holds the episode table.
+// which filters and aggregates on the server, so the browser never holds the row tables.
+// The server may carry several dashboards; routes are #/<dashboard>/<page>/<arg>.
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { scaleLinear } from "d3-scale";
@@ -9,11 +10,28 @@ import { fmt, status, statusLabel } from "./format.js";
 import { Sparkline, RunChart, BarBreakdown, StrataLines, Funnel, Lane, useWidth, monthLabel } from "./charts.jsx";
 import "./styles.css";
 
-let META = null; // /api/meta: decisions, registry, funnels, data quality, filter options
-let D = null;    // decisions.yaml
+let DASH = null; // id of the dashboard on screen
+let META = null; // /api/<dashboard>/meta: decisions, registry, funnels, data quality, filter options
+let D = null;    // the dashboard's decisions (config/decisions/platform.yaml + <dashboard>.yaml)
 let MIN_N = 11;
 let METRICS = [];
 let MBYID = {};
+let PRIMARY = null; // the dashboard's primary row table: { name, id_column, unit, unit_plural }
+
+const api = (path) => `/api/${DASH}${path}`;
+const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+const countOf = (n, table) => `${n} ${n === 1 ? table.unit : table.unit_plural}`;
+
+function setDashboard(id, meta) {
+  DASH = id;
+  META = meta;
+  D = meta.decisions;
+  MIN_N = meta.small_cell_n;
+  METRICS = meta.metrics;
+  MBYID = Object.fromEntries(METRICS.map((m) => [m.id, m]));
+  PRIMARY = meta.row_tables[0];
+  document.title = meta.dashboard.title;
+}
 
 // ----------------------------------------------------------------------------
 // Data access
@@ -69,9 +87,11 @@ function metricMeta(id, thr, def) {
 // ----------------------------------------------------------------------------
 // Routing (hash) so the browser back button works between pages
 // ----------------------------------------------------------------------------
+const hashParts = () => window.location.hash.replace(/^#\/?/, "").split("/").filter((p) => p !== "");
+
 function useRoute() {
   const parse = () => {
-    const [page, arg] = (window.location.hash.replace(/^#\/?/, "") || "overview").split("/");
+    const [, page, arg] = hashParts();
     return { page: page || "overview", arg: arg ? decodeURIComponent(arg) : null };
   };
   const [r, setR] = useState(parse);
@@ -82,7 +102,8 @@ function useRoute() {
   }, []);
   return r;
 }
-const go = (page, arg) => { window.location.hash = `/${page}${arg ? "/" + encodeURIComponent(arg) : ""}`; };
+const route = (page, arg) => `#/${DASH}/${page}${arg ? "/" + encodeURIComponent(arg) : ""}`;
+const go = (page, arg) => { window.location.hash = route(page, arg); };
 
 // ----------------------------------------------------------------------------
 // Filters
@@ -122,7 +143,7 @@ function FilterRail({ F, setF, nEp, nTot }) {
         <h2>Filters</h2>
         {active > 0 && <button className="link" onClick={() => setF({})}>Reset</button>}
       </div>
-      <div className="rail-count"><b>{nEp ?? "…"}</b> of {nTot} IMV episodes</div>
+      <div className="rail-count"><b>{nEp ?? "…"}</b> of {countOf(nTot, PRIMARY)}</div>
       <label className="f-lab">From</label>
       <select value={F.from || ""} onChange={(e) => setF({ ...F, from: e.target.value || null })}>
         <option value="">Earliest ({monthLabel(months[0])})</option>
@@ -136,11 +157,15 @@ function FilterRail({ F, setF, nEp, nTot }) {
       {META.filter_fields.map(([f, lab]) => (
         <MultiSelect key={f} label={lab} options={META.filter_options[f]} value={F[f]} onChange={(v) => setF({ ...F, [f]: v })} />
       ))}
-      <label className="f-lab">Tracheostomy during episode</label>
-      <select value={F.trach || ""} onChange={(e) => setF({ ...F, trach: e.target.value || null })}>
-        <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
-      </select>
-      <p className="rail-note">Scope: invasive mechanical ventilation in adult ICU patients. Filters apply to every page.</p>
+      {META.trach_filter && (
+        <>
+          <label className="f-lab">Tracheostomy during episode</label>
+          <select value={F.trach || ""} onChange={(e) => setF({ ...F, trach: e.target.value || null })}>
+            <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
+          </select>
+        </>
+      )}
+      <p className="rail-note">Each row is one {PRIMARY.unit}. Filters apply to every page.</p>
     </aside>
   );
 }
@@ -168,13 +193,13 @@ function downloadCSV(name, rows) {
 // Overview
 // ----------------------------------------------------------------------------
 function Overview({ F }) {
-  const state = useApi(`/api/overview${query(F)}`);
+  const state = useApi(`${api("/overview")}${query(F)}`);
   return (
     <Loading state={state}>{(data) => (
       <div>
         <div className="page-head">
           <h1>Overview</h1>
-          <p className="lede">{data.n_episodes} IMV episodes and {data.n_proning} {data.n_proning === 1 ? "patient" : "patients"} in the proning cohort for the current filters. Click any measure for its run chart, breakdowns and the full list of decisions behind it.</p>
+          <p className="lede">{META.row_tables.map((t) => countOf(data[`n_${t.name}`], t)).join(" and ")} for the current filters. Click any measure for its run chart, breakdowns and the full list of decisions behind it.</p>
         </div>
         {META.domains.map((dom) => {
           const ms = METRICS.filter((m) => D.metrics[m.id].domain === dom);
@@ -244,7 +269,7 @@ function DecisionsPanel({ meta, agg, m }) {
       <div className="numden">
         <div><span className="nd-k">Numerator</span><span>{meta.numerator}</span>{m.kind === "ratio" && <b className="nd-v">{agg.num}</b>}</div>
         <div><span className="nd-k">Denominator</span><span>{meta.denominator}</span>{m.kind === "ratio" ? <b className="nd-v">{agg.den}</b> : <b className="nd-v">n {agg.n}</b>}</div>
-        <div><span className="nd-k">Target</span><span>{meta.target != null ? `${meta.target_op || (meta.direction === "lower" ? "≤" : "≥")} ${fmt(meta.target, meta)}` : "None set — add one under this metric in decisions.yaml"}</span></div>
+        <div><span className="nd-k">Target</span><span>{meta.target != null ? `${meta.target_op || (meta.direction === "lower" ? "≤" : "≥")} ${fmt(meta.target, meta)}` : `None set — add one under this metric in config/decisions/${DASH}.yaml`}</span></div>
       </div>
       <h3>Decisions for this measure</h3>
       <DecisionTable rows={meta.decisions} />
@@ -252,7 +277,7 @@ function DecisionsPanel({ meta, agg, m }) {
         {shared ? "Hide" : "Show"} the {D.shared.length} decisions shared by every measure
       </button>
       {shared && <DecisionTable rows={D.shared} />}
-      <p className="muted small">Every choice above is read from <code>decisions.yaml</code>; change a value there and rebuild (<code>clif-dash build</code>) to update both the numbers and this panel.</p>
+      <p className="muted small">Every choice above is read from <code>config/decisions/platform.yaml</code> and <code>config/decisions/{DASH}.yaml</code>; change a value there and rebuild (<code>clif-dash build</code>) to update both the numbers and this panel.</p>
     </section>
   );
 }
@@ -263,7 +288,7 @@ function DecisionsPanel({ meta, agg, m }) {
 function MetricPage({ id, F }) {
   const [strat, setStrat] = useState("unit");
   const [view, setView] = useState("bars");
-  const state = useApi(`/api/metric/${encodeURIComponent(id)}${query(F, { stratum: strat })}`);
+  const state = useApi(`${api(`/metric/${encodeURIComponent(id)}`)}${query(F, { stratum: strat })}`);
   return (
     <Loading state={state}>{(data) => {
       const m = data.metric;
@@ -281,7 +306,7 @@ function MetricPage({ id, F }) {
       const stratLabel = META.strata.find((x) => x.id === strat).label;
       return (
         <div>
-          <nav className="crumbs"><a href="#/overview">Overview</a> / {meta.domain}</nav>
+          <nav className="crumbs"><a href={route("overview")}>Overview</a> / {meta.domain}</nav>
           <div className="page-head metric-head">
             <div>
               <h1><span className="h-num">{meta.number}</span>{meta.title}</h1>
@@ -380,7 +405,7 @@ function MetricPage({ id, F }) {
                 </tbody>
               </table>
             )}
-            <p className="muted small">Click a bar to list the episodes behind it. Groups with n &lt; {MIN_N} are greyed (⚠).</p>
+            <p className="muted small">Click a bar to list the {PRIMARY.unit_plural} behind it. Groups with n &lt; {MIN_N} are greyed (⚠).</p>
           </section>
 
           {m.oe && (
@@ -403,21 +428,21 @@ function MetricPage({ id, F }) {
           <div className="two-col">
             <section className="card">
               <h2>Cohort</h2>
-              <p className="muted small">{m.source === "proning" ? "Proning cohort (CLIF proning study definition, ported to Python)." : "IMV episode cohort shared by all non-proning measures."} Counts are for the full data, before the filters on the left.</p>
+              <p className="muted small">{m.source === "proning" ? "Proning cohort (CLIF proning study definition, ported to Python)." : `${cap(PRIMARY.unit)} cohort shared by every measure built on ${PRIMARY.unit_plural}.`} Counts are for the full data, before the filters on the left.</p>
               <Funnel steps={data.funnel} />
             </section>
             <section className="card">
               <h2>Input completeness</h2>
-              <p className="muted small">Share of filtered IMV episodes with each input this measure depends on. Low completeness usually explains odd values better than practice does.</p>
+              <p className="muted small">Share of filtered {PRIMARY.unit_plural} with each input this measure depends on. Low completeness usually explains odd values better than practice does.</p>
               {data.completeness.length ? (
                 <table className="dtable num">
                   <tbody>{data.completeness.map(({ key, label, n, total }) => (
                     <tr key={key}><td>{label}</td><td>{total ? Math.round((100 * n) / total) : 0}%</td><td className="muted">{n} / {total}</td></tr>
                   ))}</tbody>
                 </table>
-              ) : <p className="muted small">Uses ventilator, ADT and discharge data only.</p>}
+              ) : <p className="muted small">This measure depends on no optional input.</p>}
               <p className="small">Provenance: {META.meta.clifpy}; pipeline {META.meta.pipeline_version}; data folder <code>{META.meta.data_folder}</code>, built {META.meta.generated_at}.</p>
-              <button className="link" onClick={() => go("patients", `${routeId}|missed|1`)}>List episodes that missed this measure →</button>
+              <button className="link" onClick={() => go("patients", `${routeId}|missed|1`)}>List {PRIMARY.unit_plural} that missed this measure →</button>
             </section>
           </div>
         </div>
@@ -430,13 +455,13 @@ function MetricPage({ id, F }) {
 // Unit comparison heatmap
 // ----------------------------------------------------------------------------
 function Units({ F }) {
-  const state = useApi(`/api/units${query(F)}`);
+  const state = useApi(`${api("/units")}${query(F)}`);
   return (
     <Loading state={state}>{(data) => (
       <div>
         <div className="page-head">
           <h1>ICU comparison</h1>
-          <p className="lede">Each cell is the measure for one ICU under the current filters. Icons show target status; grey cells have fewer than {MIN_N} in the denominator. Click a cell to see its episodes.</p>
+          <p className="lede">Each cell is the measure for one ICU under the current filters. Icons show target status; grey cells have fewer than {MIN_N} in the denominator. Click a cell to see its {PRIMARY.unit_plural}.</p>
         </div>
         <div className="card scroll-x">
           <table className="heat">
@@ -448,7 +473,7 @@ function Units({ F }) {
                 const meta = D.metrics[row.id];
                 return (
                   <tr key={row.id}>
-                    <th scope="row"><a href={`#/metric/${row.id}`}><span className="h-num sm">{meta.number}</span>{meta.short}</a></th>
+                    <th scope="row"><a href={route("metric", row.id)}><span className="h-num sm">{meta.number}</span>{meta.short}</a></th>
                     <HeatCell a={row.all} meta={meta} />
                     {data.units.map((u) => (
                       <HeatCell key={u} a={row.cells[u]} meta={meta} onClick={() => go("patients", `${row.id}|unit|${u}`)} />
@@ -482,9 +507,35 @@ function HeatCell({ a, meta, onClick }) {
 }
 
 // ----------------------------------------------------------------------------
-// Patient (episode) list
+// Row list (episodes for the respiratory dashboard)
 // ----------------------------------------------------------------------------
 const PAGE_SIZE = 100;
+
+// The respiratory list shows chosen columns, some computed from two fields; other
+// dashboards list every column of their primary rows.
+const RESPIRATORY_LIST = {
+  columns: (thr) => [
+    ["label_id", "Hospitalization"], ["start", "IMV start"], ["unit", "ICU"], ["imv_days", "IMV days"],
+    ["vt_pbw_median", "Median Vt/PBW"], ["ltvv", thr != null ? `LTVV hours (≤ ${thr})` : "LTVV hours"], ["plat", "Plateau ≤ 30"], ["sat", "SAT days"],
+    ["sbt", "SBT days"], ["para8", "Paralytic > 8 h days"], ["reint_num", "Reintubated"], ["vfd28", "VFD-28"], ["discharge", "Discharge"],
+  ],
+  cell: (e, c, ltvvCol) => {
+    switch (c) {
+      case "ltvv": return e.ltvv_den ? `${Math.round((100 * (e[ltvvCol] ?? e.ltvv_num)) / e.ltvv_den)}% of ${e.ltvv_den} h` : <span className="muted">{e.has_height ? "—" : "no height"}</span>;
+      case "plat": return e.plat_den ? `${e.plat_num}/${e.plat_den}` : "—";
+      case "sat": return e.sat_den ? `${e.sat_num}/${e.sat_den}` : "—";
+      case "sbt": return e.sbt_den ? `${e.sbt_num}/${e.sbt_den}` : "—";
+      case "para8": return e.para8_den ? `${e.para8_num}/${e.para8_den}` : "—";
+      case "reint_num": return e.ext_den ? (e.reint_num ? "Yes" : "No") : "—";
+      default: return e[c] ?? "—";
+    }
+  },
+};
+const GENERIC_LIST = {
+  columns: (thr, rows) => Object.keys(rows[0] || {}).map((c) => [c, c.replace(/_/g, " ")]),
+  cell: (e, c) => (typeof e[c] === "number" && !Number.isInteger(e[c]) ? e[c].toFixed(2) : e[c] ?? "—"),
+};
+const LISTS = { respiratory: RESPIRATORY_LIST };
 
 function Patients({ F, arg }) {
   const [q, setQ] = useState("");
@@ -497,60 +548,47 @@ function Patients({ F, arg }) {
   const selection = mid && MBYID[mid.split("@")[0]] ? { metric: mid, field, value: val } : {};
   const [sk, sd] = sort;
   const params = { ...selection, q: search, sort: sk, direction: sd };
-  const state = useApi(`/api/episodes${query(F, { ...params, offset, limit: PAGE_SIZE })}`);
-  const cols = (thr) => [
-    ["label_id", "Hospitalization"], ["start", "IMV start"], ["unit", "ICU"], ["imv_days", "IMV days"],
-    ["vt_pbw_median", "Median Vt/PBW"], ["ltvv", thr != null ? `LTVV hours (≤ ${thr})` : "LTVV hours"], ["plat", "Plateau ≤ 30"], ["sat", "SAT days"],
-    ["sbt", "SBT days"], ["para8", "Paralytic > 8 h days"], ["reint_num", "Reintubated"], ["vfd28", "VFD-28"], ["discharge", "Discharge"],
-  ];
-  const cell = (e, c, ltvvCol) => {
-    switch (c) {
-      case "ltvv": return e.ltvv_den ? `${Math.round((100 * (e[ltvvCol] ?? e.ltvv_num)) / e.ltvv_den)}% of ${e.ltvv_den} h` : <span className="muted">{e.has_height ? "—" : "no height"}</span>;
-      case "plat": return e.plat_den ? `${e.plat_num}/${e.plat_den}` : "—";
-      case "sat": return e.sat_den ? `${e.sat_num}/${e.sat_den}` : "—";
-      case "sbt": return e.sbt_den ? `${e.sbt_num}/${e.sbt_den}` : "—";
-      case "para8": return e.para8_den ? `${e.para8_num}/${e.para8_den}` : "—";
-      case "reint_num": return e.ext_den ? (e.reint_num ? "Yes" : "No") : "—";
-      default: return e[c] ?? "—";
-    }
-  };
+  const state = useApi(`${api("/rows")}${query(F, { ...params, offset, limit: PAGE_SIZE })}`);
+  const { columns: listColumns, cell } = LISTS[DASH] || GENERIC_LIST;
+  const idColumn = PRIMARY.id_column;
   const missedValue = selection.metric && field === "missed" ? `${selection.metric.split("@")[0]}|missed|1` : "";
   return (
     <div>
       <div className="page-head">
-        <h1>Episodes</h1>
-        <p className="lede">One row per IMV episode. Only hospitalization IDs are shown. Click a row for its hourly timeline.</p>
+        <h1>{cap(PRIMARY.unit_plural)}</h1>
+        <p className="lede">One row per {PRIMARY.unit}. Only hospitalization IDs are shown.{META.dashboard.detail ? " Click a row for its hourly timeline." : ""}</p>
       </div>
       <div className="card">
         <div className="card-head">
           <div className="seg">
             <input type="search" placeholder="Search ID, ICU, discharge…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select value={missedValue} onChange={(e) => go("patients", e.target.value || null)} aria-label="Show episodes that missed a measure">
-              <option value="">All episodes</option>
+            <select value={missedValue} onChange={(e) => go("patients", e.target.value || null)} aria-label={`Show ${PRIMARY.unit_plural} that missed a measure`}>
+              <option value="">All {PRIMARY.unit_plural}</option>
               {METRICS.map((x) => <option key={x.id} value={`${x.id}|missed|1`}>Missed: {D.metrics[x.id].short}</option>)}
             </select>
           </div>
-          <a className="btn" href={`/api/episodes.csv${query(F, params)}`}>Download CSV</a>
+          <a className="btn" href={`${api("/rows.csv")}${query(F, params)}`}>Download CSV</a>
         </div>
         <Loading state={state}>{(data) => (
           <>
-            {data.note && <p className="filter-note">{data.note} · <a href="#/patients">clear</a></p>}
+            {data.note && <p className="filter-note">{data.note} · <a href={route("patients")}>clear</a></p>}
             <div className="scroll-x">
               <table className="dtable list">
-                <thead><tr>{cols(data.ltvv_threshold).map(([c, lab]) => (
+                <thead><tr>{listColumns(data.ltvv_threshold, data.rows).map(([c, lab]) => (
                   <th key={c} onClick={() => setSort([c, sk === c ? -sd : 1])} className="sortable">
                     {lab}{sk === c ? (sd > 0 ? " ▲" : " ▼") : ""}
                   </th>))}</tr></thead>
                 <tbody>{data.rows.map((e) => (
-                  <tr key={e.episode_id} onClick={() => go("timeline", e.episode_id)} className="clickable">
-                    {cols(data.ltvv_threshold).map(([c]) => <td key={c}>{cell(e, c, data.ltvv_column)}</td>)}
+                  <tr key={e[idColumn]} onClick={META.dashboard.detail ? () => go("timeline", e[idColumn]) : undefined}
+                    className={META.dashboard.detail ? "clickable" : ""}>
+                    {listColumns(data.ltvv_threshold, data.rows).map(([c]) => <td key={c}>{cell(e, c, data.ltvv_column)}</td>)}
                   </tr>))}
                 </tbody>
               </table>
             </div>
             <div className="pager">
               <span className="muted small">
-                {data.total ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${data.total} episodes` : "0 episodes"}
+                {data.total ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${countOf(data.total, PRIMARY)}` : `0 ${PRIMARY.unit_plural}`}
               </span>
               {offset > 0 && <button className="btn" onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>← Previous {PAGE_SIZE}</button>}
               {offset + PAGE_SIZE < data.total && <button className="btn" onClick={() => setOffset(offset + PAGE_SIZE)}>Next {PAGE_SIZE} →</button>}
@@ -568,11 +606,11 @@ function Patients({ F, arg }) {
 const DEV_COLOR = { imv: "var(--series-1)", nippv: "var(--series-2)", cpap: "var(--series-2)", "high flow nc": "var(--series-3)", "trach collar": "var(--series-4)", "nasal cannula": "var(--seq-250)", "face mask": "var(--seq-250)", "room air": "var(--surface-3)" };
 
 function Timeline({ F, arg }) {
-  const first = useApi(arg ? null : `/api/episodes${query(F, { limit: 1 })}`);
+  const first = useApi(arg ? null : `${api("/rows")}${query(F, { limit: 1 })}`);
   useEffect(() => {
     if (!arg && first.data && first.data.rows.length) go("timeline", first.data.rows[0].episode_id);
   }, [arg, first.data]);
-  const state = useApi(arg ? `/api/timeline/${encodeURIComponent(arg)}` : null);
+  const state = useApi(arg ? api(`/detail/${encodeURIComponent(arg)}`) : null);
   const [ref, w] = useWidth(900);
   if (!arg) return (
     <div><div className="page-head"><h1>Timeline</h1></div>
@@ -580,7 +618,7 @@ function Timeline({ F, arg }) {
   );
   return (
     <Loading state={state}>{(data) => {
-      const e = data.episode;
+      const e = data.row;
       const T = data.series;
       const pr = data.proning;
       const iw = w - 92;
@@ -604,7 +642,7 @@ function Timeline({ F, arg }) {
       const paraThr = ((D.metrics.paralytic_8h || {}).decisions || []).find((d) => d.id === "hours_threshold")?.value ?? 8;
       return (
         <div>
-          <nav className="crumbs"><a href="#/patients">Episodes</a> / {e.label_id}</nav>
+          <nav className="crumbs"><a href={route("patients")}>Episodes</a> / {e.label_id}</nav>
           <div className="page-head metric-head">
             <div>
               <h1>Hospitalization {e.label_id}</h1>
@@ -710,17 +748,17 @@ function Timeline({ F, arg }) {
 // Data quality
 // ----------------------------------------------------------------------------
 function Quality({ F }) {
-  const state = useApi(`/api/quality${query(F)}`);
+  const state = useApi(`${api("/quality")}${query(F)}`);
   const dq = META.data_quality;
   return (
     <Loading state={state}>{(data) => {
       const notes = [];
       if (dq.sat_documented_rows === 0) notes.push("No documented SAT assessments (sat_delivery_pass_fail): the SAT measure relies on the EHR phenotype only.");
       if (dq.prone_position_rows < 5) notes.push(`Only ${dq.prone_position_rows} prone position row(s) in the position table: proning measures will be near zero or empty.`);
-      if (dq.semi_prone_names.length) notes.push(`Position names mapped to prone that contain "semi": ${dq.semi_prone_names.join(", ")}. Review the mCIDE mapping.`);
+      if ((dq.semi_prone_names || []).length) notes.push(`Position names mapped to prone that contain "semi": ${dq.semi_prone_names.join(", ")}. Review the mCIDE mapping.`);
       if (dq.respiratory_rows_without_time) notes.push(`${dq.respiratory_rows_without_time.toLocaleString()} respiratory_support rows have no recorded_dttm and were left out of the ventilator timeline.`);
       if (dq.icu_rows_without_location_type) notes.push(`${dq.icu_rows_without_location_type} ICU ADT rows have no location_type: they appear as "ICU (type not mapped)".`);
-      if (data.n_episodes && data.n_with_height / data.n_episodes < 0.9) notes.push(`Height is missing for ${data.n_episodes - data.n_with_height} of ${data.n_episodes} episodes, so their ventilator hours drop out of the LTVV denominator.`);
+      if (data.n_rows && data.n_with_height != null && data.n_with_height / data.n_rows < 0.9) notes.push(`Height is missing for ${data.n_rows - data.n_with_height} of ${data.n_rows} episodes, so their ventilator hours drop out of the LTVV denominator.`);
       return (
         <div>
           <div className="page-head">
@@ -733,7 +771,7 @@ function Quality({ F }) {
               <ul>{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
             </section>
           )}
-          <section className="card scroll-x">
+          {data.completeness.length > 0 && <section className="card scroll-x">
             <h2>Input completeness by ICU</h2>
             <table className="dtable num">
               <thead><tr><th>Input</th><th>All</th>{data.units.map((u) => <th key={u}>{u}</th>)}</tr></thead>
@@ -746,14 +784,14 @@ function Quality({ F }) {
                 </tr>))}
               </tbody>
             </table>
-          </section>
+          </section>}
           <div className="two-col">
             <section className="card">
               <h2>Tables loaded</h2>
-              <table className="dtable num"><tbody>{Object.entries(dq.row_counts).map(([k, v]) => <tr key={k}><td><code>{k}</code></td><td>{v.toLocaleString()} rows</td><td className="muted">{(dq.outliers[k] ?? Object.entries(dq.outliers).filter(([kk]) => kk.startsWith(k + ".")).reduce((s, [, n]) => s + n, 0)) || 0} outliers set to missing</td></tr>)}</tbody></table>
-              <p className="muted small">Outlier counts cover the rows the build read: adult encounters for respiratory support, cohort encounters for the other tables.</p>
+              <table className="dtable num"><tbody>{Object.entries(dq.row_counts).map(([k, v]) => <tr key={k}><td><code>{k}</code></td><td>{v.toLocaleString()} rows</td>{dq.outliers && <td className="muted">{(dq.outliers[k] ?? Object.entries(dq.outliers).filter(([kk]) => kk.startsWith(k + ".")).reduce((s, [, n]) => s + n, 0)) || 0} outliers set to missing</td>}</tr>)}</tbody></table>
+              {dq.outliers && <p className="muted small">Outlier counts cover the rows the build read: adult encounters for respiratory support, cohort encounters for the other tables.</p>}
             </section>
-            <section className="card">
+            {("mortality_model" in dq || "proning_model" in dq) && <section className="card">
               <h2>Models</h2>
               {dq.mortality_model ? (
                 <>
@@ -769,7 +807,7 @@ function Quality({ F }) {
                 </>
               )}
               <p className="small">Built with {META.meta.clifpy}. Proning logic: {META.meta.proning_source}.</p>
-            </section>
+            </section>}
           </div>
         </div>
       );
@@ -780,13 +818,15 @@ function Quality({ F }) {
 // ----------------------------------------------------------------------------
 // Shell
 // ----------------------------------------------------------------------------
-function App() {
-  const route = useRoute();
+function App({ dashboards }) {
+  const route_ = useRoute();
   const [F, setF] = useState({});
   const [theme, setTheme] = useState(null);
-  const count = useApi(`/api/episodes${query(F, { limit: 0 })}`);
+  const count = useApi(`${api("/rows")}${query(F, { limit: 0 })}`);
   useEffect(() => { if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme; }, [theme]);
-  const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"], ["patients", "Episodes"], ["timeline", "Timeline"], ["quality", "Data quality"]];
+  const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"], ["patients", cap(PRIMARY.unit_plural)],
+    ...(META.dashboard.detail ? [["timeline", "Timeline"]] : []), ["quality", "Data quality"]];
+  const firstMetric = METRICS[0].id;
   return (
     <div className="shell viz-root">
       <header className="top">
@@ -795,13 +835,15 @@ function App() {
             <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 3v7M12 10c-2 0-6 1-7 6s1 5 3 5 4-3 4-6M12 10c2 0 6 1 7 6s-1 5-3 5-4-3-4-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </div>
           <div>
-            <div className="title">ICU Respiratory Failure Quality</div>
-            <div className="sub">{META.meta.site_name} · built {META.meta.generated_at} · CLIF 2.1</div>
+            <div className="title">{META.dashboard.title}</div>
+            <div className="sub">{META.meta.site_name} · built {META.meta.generated_at} · CLIF 2.1
+              {dashboards.length > 1 && <> · <a href="#/">All dashboards</a></>}
+            </div>
           </div>
         </div>
         <nav className="tabs" aria-label="Pages">
           {tabs.map(([k, lab]) => (
-            <a key={k} href={`#/${k}`} className={route.page === k ? "on" : ""}>{lab}</a>
+            <a key={k} href={route(k)} className={route_.page === k ? "on" : ""}>{lab}</a>
           ))}
         </nav>
         <button className="btn theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Toggle dark mode">
@@ -809,31 +851,78 @@ function App() {
         </button>
       </header>
       <div className="body">
-        <FilterRail F={F} setF={setF} nEp={count.data ? count.data.total : null} nTot={META.n_episodes_total} />
+        <FilterRail F={F} setF={setF} nEp={count.data ? count.data.total : null} nTot={META.n_total} />
         <main>
-          {route.page === "overview" && <Overview F={F} />}
-          {route.page === "metric" && <MetricPage id={route.arg || "ltvv"} F={F} key={(route.arg || "ltvv").split("@")[0]} />}
-          {route.page === "units" && <Units F={F} />}
-          {route.page === "patients" && <Patients F={F} arg={route.arg} />}
-          {route.page === "timeline" && <Timeline F={F} arg={route.arg} />}
-          {route.page === "quality" && <Quality F={F} />}
+          {route_.page === "overview" && <Overview F={F} />}
+          {route_.page === "metric" && <MetricPage id={route_.arg || firstMetric} F={F} key={(route_.arg || firstMetric).split("@")[0]} />}
+          {route_.page === "units" && <Units F={F} />}
+          {route_.page === "patients" && <Patients F={F} arg={route_.arg} />}
+          {route_.page === "timeline" && META.dashboard.detail && <Timeline F={F} arg={route_.arg} />}
+          {route_.page === "quality" && <Quality F={F} />}
         </main>
       </div>
-      <footer className="foot">Shows patient-level data — run this server only inside your institution. Measures computed from CLIF tables with clifpy; definitions in decisions.yaml.<div className="copyright">Interface and metric logic © 2026 Cathy Gao-Howard on behalf of the CLIF Consortium</div></footer>
+      <footer className="foot">Shows patient-level data — run this server only inside your institution. Measures computed from CLIF tables with clifpy; definitions in config/decisions/.<div className="copyright">Interface and metric logic © 2026 Cathy Gao-Howard on behalf of the CLIF Consortium</div></footer>
     </div>
   );
 }
 
+// ----------------------------------------------------------------------------
+// Dashboards: pick one from the hash, load its meta, and remount on a switch
+// ----------------------------------------------------------------------------
+/** The dashboard the hash names. A hash from before dashboards had ids (#/metric/ltvv)
+ *  gets the first dashboard's id put in front of it; an empty hash with several
+ *  dashboards shows the landing page (null). */
+function dashboardFromHash(ids) {
+  const parts = hashParts();
+  if (ids.includes(parts[0])) return parts[0];
+  if (parts.length === 0 && ids.length > 1) return null;
+  window.history.replaceState(null, "", `#/${[ids[0], ...parts].join("/")}`);
+  return ids[0];
+}
+
+function Landing({ dashboards }) {
+  return (
+    <div className="shell viz-root">
+      <main className="landing">
+        <div className="page-head"><h1>CLIF ICU quality dashboards</h1></div>
+        <div className="tiles">
+          {dashboards.map((d) => <a key={d.id} className="tile" href={`#/${d.id}/overview`}><span className="tile-title">{d.title}</span></a>)}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function Root({ dashboards }) {
+  const ids = dashboards.map((d) => d.id);
+  const [dash, setDash] = useState(() => dashboardFromHash(ids));
+  const [loaded, setLoaded] = useState({ id: null, error: null });
+  useEffect(() => {
+    const f = () => setDash(dashboardFromHash(ids));
+    window.addEventListener("hashchange", f);
+    return () => window.removeEventListener("hashchange", f);
+  }, []);
+  useEffect(() => {
+    if (!dash) { document.title = "CLIF ICU quality dashboards"; return undefined; }
+    let live = true;
+    fetch(`/api/${dash}/meta`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
+      .then((meta) => { if (live) { setDashboard(dash, meta); setLoaded({ id: dash, error: null }); } })
+      .catch((e) => live && setLoaded({ id: null, error: e.message }));
+    return () => { live = false; };
+  }, [dash]);
+  if (!dash) return <Landing dashboards={dashboards} />;
+  if (loaded.error) return <p style={{ padding: "2rem" }}>Could not load the {dash} dashboard ({loaded.error}).</p>;
+  if (loaded.id !== dash) return <p style={{ padding: "2rem" }}>Loading…</p>;
+  return <App key={dash} dashboards={dashboards} />;
+}
+
 const root = document.getElementById("root");
-fetch("/api/meta")
+fetch("/api/dashboards")
   .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
-  .then((meta) => {
-    META = meta;
-    D = meta.decisions;
-    MIN_N = meta.small_cell_n;
-    METRICS = meta.metrics;
-    MBYID = Object.fromEntries(METRICS.map((m) => [m.id, m]));
-    createRoot(root).render(<App />);
+  .then((dashboards) => {
+    if (!dashboards.length) return Promise.reject(new Error("no dashboard has been built"));
+    createRoot(root).render(<Root dashboards={dashboards} />);
   })
   .catch((e) => {
     root.innerHTML = `<p style='padding:2rem;font-family:system-ui'>Could not reach the dashboard API (${e.message}). Start it with <code>uv run clif-dash serve --config &lt;site.yaml&gt;</code>.</p>`;

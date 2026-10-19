@@ -95,6 +95,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "strata": [{"id": i, "label": label} for i, label in strata if i in store.primary_rows.columns],
             "completeness": [list(c) for c in completeness_flags],
             "filter_fields": [list(f) for f in store.filter_fields()], "filter_options": store.filter_options(),
+            "trach_filter": "trach" in store.primary_rows.columns,
             "n_total": int(len(store.primary_rows)), "small_cell_n": store.small_cell_n,
         })
 
