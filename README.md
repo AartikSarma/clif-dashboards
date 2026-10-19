@@ -33,7 +33,7 @@ To try it without real data, use `config/synth_10k.yaml`, which points at a synt
 
 ## Change a definition
 
-Every analytic choice lives in `config/decisions/`: thresholds, windows, ventilator modes, eligibility rules and targets. `platform.yaml` holds the site-wide choices every dashboard shares (adult age, encounter linking, outliers, time zone, small cells), and each dashboard has its own file, such as `respiratory.yaml`. Each measure's page shows both in its "How this is calculated" panel, read from the same files, so the page always matches what was computed. To change a definition for your site, copy the file, edit the copy, name it under `decisions:` in your site config (for example `respiratory: decisions/respiratory_my_site.yaml`), and rebuild. A dashboard's file cannot change a site-wide value; change those in `platform.yaml`.
+Every analytic choice lives in `config/decisions/`: thresholds, windows, ventilator modes, eligibility rules and targets. `platform.yaml` holds the site-wide choices every dashboard shares (adult age, encounter linking, outliers, time zone, small cells), and each dashboard has its own file, such as `respiratory.yaml`. Each measure's page shows both in its "How this is calculated" panel, read from the same files, so the page always matches what was computed. To change a definition for your site, copy the file, edit the copy, name it under `decisions:` in your site config (for example `respiratory: decisions_my_site.yaml`, which keeps it in `config/` and out of git), and rebuild. A dashboard's file cannot change a site-wide value; change those in `platform.yaml`.
 
 ## Keep it inside your institution
 

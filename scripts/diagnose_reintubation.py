@@ -39,7 +39,7 @@ def main() -> None:
                         help="also list the site's device_name strings; review them locally before sharing, "
                              "since free-text entries can carry identifying details")
     args = parser.parse_args()
-    stage_dir = load_config(args.config).stage_dir
+    stage_dir = load_config(args.config).bind("respiratory").stage_dir
 
     runs = pd.read_parquet(stage_dir / "runs_a.parquet").sort_values(["encounter_block", "run_start"])
     runs["next_start"] = runs.groupby("encounter_block")["run_start"].shift(-1)
