@@ -1,7 +1,7 @@
 """Site configuration: where the CLIF tables live and where built outputs go."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -20,13 +20,25 @@ class SiteConfig:
     encounters_per_chunk: int
     cohort_encounters_per_chunk: int
     workers: int
+    dashboards: tuple[str, ...] = ("respiratory",)   # dashboards this site builds and serves
+    dashboard: str | None = None                      # set by bind(): the dashboard being built or served
 
     def table_path(self, table: str) -> Path:
         return self.clif_dir / f"{self.file_prefix}{table}.parquet"
 
+    def bind(self, dashboard: str) -> "SiteConfig":
+        """This config for one dashboard, whose outputs live in output_dir/<dashboard>."""
+        return replace(self, dashboard=dashboard)
+
+    @property
+    def dashboard_dir(self) -> Path:
+        if self.dashboard is None:
+            raise ValueError("dashboard_dir needs a config bound to a dashboard (SiteConfig.bind)")
+        return self.output_dir / self.dashboard
+
     @property
     def stage_dir(self) -> Path:
-        return self.output_dir / "stage"
+        return self.dashboard_dir / "stage"
 
     def decisions(self) -> dict:
         return yaml.safe_load(self.decisions_file.read_text())
@@ -56,4 +68,5 @@ def load_config(config_path: str | Path, clif_dir_override: str | None = None) -
         encounters_per_chunk=int(raw.get("encounters_per_chunk", 2000)),
         cohort_encounters_per_chunk=int(raw.get("cohort_encounters_per_chunk", 300)),
         workers=int(raw.get("workers", 4)),
+        dashboards=tuple(raw.get("dashboards") or ("respiratory",)),
     )

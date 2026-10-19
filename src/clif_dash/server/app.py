@@ -39,6 +39,7 @@ def parse_filters(request: Request) -> Filters:
 
 
 def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> FastAPI:
+    cfg = cfg.bind(dashboard.id)
     store = Store(cfg)
     detail_builder = dashboard.detail(store) if dashboard.detail else None
     metrics, metrics_by_id, resolve = dashboard.metrics, dashboard.metrics_by_id, dashboard.resolve

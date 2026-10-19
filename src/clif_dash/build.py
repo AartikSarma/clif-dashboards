@@ -18,6 +18,7 @@ import json
 import shutil
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -61,11 +62,40 @@ def data_quality(con, cfg: SiteConfig, dashboard: Dashboard) -> dict:
     }
 
 
+@dataclass
+class Site:
+    """Encounters stitched once per build invocation and shared by every dashboard built in it."""
+    encounters: pd.DataFrame
+    mapping: pd.DataFrame
+    adt: pd.DataFrame
+    clifpy_source: str
+
+
+def stitch_site(cfg: SiteConfig) -> Site:
+    log(f"Encounters from {cfg.clif_dir}")
+    encounters, mapping, adt, clifpy_source = build_encounters(cfg, cfg.decisions())
+    return Site(encounters, mapping, adt, clifpy_source)
+
+
+def build_all(cfg: SiteConfig, dashboards: list[Dashboard]) -> dict[str, Path]:
+    """Build several dashboards from one stitching pass; returns each dashboard's output folder."""
+    for dashboard in dashboards:
+        missing = dashboard.missing_required_tables(cfg)
+        if missing:
+            raise FileNotFoundError(f"{dashboard.id}: required CLIF tables not found: {', '.join(map(str, missing))}")
+    site = stitch_site(cfg)
+    return {d.id: build_dashboard(cfg.bind(d.id), d, site) for d in dashboards}
+
+
 def build(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Path:
-    missing = dashboard.missing_required_tables(cfg)
-    if missing:
-        raise FileNotFoundError(f"Required CLIF tables not found: {', '.join(map(str, missing))}")
+    """Build one dashboard; returns its output folder."""
+    return build_all(cfg, [dashboard])[dashboard.id]
+
+
+def build_dashboard(cfg: SiteConfig, dashboard: Dashboard, site: Site) -> Path:
+    """Build one dashboard into cfg.dashboard_dir. `cfg` is bound to the dashboard."""
     decisions = cfg.decisions()
+    output = cfg.dashboard_dir
     work = cfg.stage_dir
     if work.exists():
         shutil.rmtree(work)
@@ -73,21 +103,20 @@ def build(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Path:
     con = stage.connect()
     started = time.time()
 
-    log(f"Encounters from {cfg.clif_dir}")
-    encounters, mapping, adt, clifpy_source = build_encounters(cfg, decisions)
-    encounters.to_parquet(work / "encounters.parquet", index=False)
-    mapping.to_parquet(work / "mapping.parquet", index=False)
-    adt.to_parquet(work / "adt.parquet", index=False)
+    # Each dashboard keeps its own copy: its detail views read the mapping it was built with.
+    site.encounters.to_parquet(work / "encounters.parquet", index=False)
+    site.mapping.to_parquet(work / "mapping.parquet", index=False)
+    site.adt.to_parquet(work / "adt.parquet", index=False)
     statistics = dashboard.site_statistics(con, cfg)
 
-    result = dashboard.build(SiteBuild(cfg=cfg, con=con, encounters=encounters, mapping=mapping, adt=adt,
-                                       site_statistics=statistics))
+    log(f"Building {dashboard.id}")
+    result = dashboard.build(SiteBuild(cfg=cfg, con=con, encounters=site.encounters, mapping=site.mapping,
+                                       adt=site.adt, site_statistics=statistics))
 
     quality = data_quality(con, cfg, dashboard)
     quality.update(dashboard.data_quality(con, cfg))
     quality.update(result.data_quality)
 
-    output = cfg.output_dir
     for name, rows in result.tables.items():
         rows.to_parquet(output / f"{name}.parquet", index=False)
     summary = {
@@ -96,7 +125,7 @@ def build(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Path:
             "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
             "data_folder": cfg.clif_dir.name,
             "timezone": cfg.site_timezone,
-            "clifpy": clifpy_source,
+            "clifpy": site.clifpy_source,
             "pipeline_version": PIPELINE_VERSION,
             "upstream_commit": UPSTREAM_COMMIT,
             **result.meta,
@@ -107,7 +136,7 @@ def build(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Path:
         "data_quality": quality,
     }
     (output / "summary.json").write_text(json.dumps(summary, default=_json_default, ensure_ascii=False, indent=1))
-    log(f"Wrote {output} ({dashboard.id}) in {time.time() - started:.0f} s")
+    log(f"Wrote {output} in {time.time() - started:.0f} s")
     return output
 
 

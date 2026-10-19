@@ -7,7 +7,8 @@ site_timezone: America/Chicago        # days and months are grouped in this zone
 start_date:                           # optional analysis window, site-local dates (YYYY-MM-DD)
 end_date:
 decisions_file: decisions.yaml        # metric definitions; copy and edit to change a site's choices
-output_dir: ../output/my_site         # built tables and staged data: PHI, keep inside the institution
+output_dir: ../output/my_site         # built tables and staged data, one folder per dashboard: PHI, keep inside the institution
+dashboards: [respiratory]             # dashboards to build and serve
 encounters_per_chunk: 2000            # phase A chunk size (respiratory_support only)
 cohort_encounters_per_chunk: 300      # phase B chunk size (all large tables); lower it if workers run out of memory
 workers: 4                            # parallel worker processes

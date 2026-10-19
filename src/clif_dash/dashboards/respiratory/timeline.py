@@ -25,7 +25,7 @@ class TimelineBuilder:
         self.store = store
         cfg = store.cfg
         work = cfg.stage_dir
-        self.paralytic_days = pd.read_parquet(cfg.output_dir / "paralytic_days.parquet")
+        self.paralytic_days = pd.read_parquet(cfg.dashboard_dir / "paralytic_days.parquet")
         self.chunk_of_block = pd.read_parquet(work / "chunks_b.parquet").set_index("encounter_block")["chunk"]
         self.mapping = pd.read_parquet(work / "mapping.parquet")
         self.fio2_percent = bool(store.meta.get("fio2_recorded_as_percent", False))

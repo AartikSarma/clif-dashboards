@@ -64,7 +64,7 @@ class Filters:
 class Store:
     def __init__(self, cfg: SiteConfig):
         self.cfg = cfg
-        output = cfg.output_dir
+        output = cfg.dashboard_dir
         self.summary = json.loads((output / "summary.json").read_text())
         self.decisions = self.summary["decisions"]
         self.meta = self.summary["meta"]
