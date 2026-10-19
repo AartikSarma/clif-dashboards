@@ -6,7 +6,9 @@ site_name: My Hospital ICUs           # shown in the dashboard header
 site_timezone: America/Chicago        # days and months are grouped in this zone (CLIF stores UTC)
 start_date:                           # optional analysis window, site-local dates (YYYY-MM-DD)
 end_date:
-decisions_file: decisions.yaml        # metric definitions; copy and edit to change a site's choices
+decisions_dir: decisions              # platform.yaml (site-wide) and one <dashboard>.yaml per dashboard
+# decisions:                          # optional: a site's own copy of any of those files, by name
+#   respiratory: decisions/respiratory_my_site.yaml
 output_dir: ../output/my_site         # built tables and staged data, one folder per dashboard: PHI, keep inside the institution
 dashboards: [respiratory]             # dashboards to build and serve
 encounters_per_chunk: 2000            # phase A chunk size (respiratory_support only)
