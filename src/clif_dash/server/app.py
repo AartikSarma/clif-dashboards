@@ -1,8 +1,10 @@
-"""HTTP API for the dashboard, plus the built web UI.
+"""HTTP API for the dashboards, plus the built web UI.
 
-Every response is computed from the built outputs on request, under the filters
-in the query string. Responses carry hospitalization IDs and dates, so the
-server binds to localhost unless told otherwise; it has no login yet.
+Each built dashboard gets the same routes under /api/<dashboard id>/, and
+/api/dashboards lists them. Every response is computed from the built outputs on
+request, under the filters in the query string. Responses carry hospitalization
+IDs and dates, so the server binds to localhost unless told otherwise; it has no
+login yet.
 """
 from __future__ import annotations
 
@@ -11,13 +13,13 @@ import io
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import SiteConfig
 from ..dashboard import Dashboard, Metric
-from ..dashboards import DEFAULT_DASHBOARD
+from ..dashboards import DASHBOARDS
 from . import aggregate as agg
 from .store import FILTER_FIELDS, Filters, Store, jsonable
 
@@ -38,14 +40,37 @@ def parse_filters(request: Request) -> Filters:
     )
 
 
-def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> FastAPI:
-    cfg = cfg.bind(dashboard.id)
+def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None) -> FastAPI:
+    """Serve every dashboard in `dashboards` (default: the site's list) that has a finished build."""
+    dashboards = [DASHBOARDS[i] for i in cfg.dashboards] if dashboards is None else dashboards
+    built = [d for d in dashboards if (cfg.bind(d.id).dashboard_dir / "summary.json").exists()]
+    app = FastAPI(title="CLIF ICU quality dashboards", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+    @app.get("/api/dashboards")
+    def dashboard_list():
+        return [{"id": d.id, "title": d.title} for d in built]
+
+    for dashboard in built:
+        app.include_router(dashboard_routes(cfg.bind(dashboard.id), dashboard), prefix=f"/api/{dashboard.id}")
+
+    if WEB_DIST.exists():
+        app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
+
+        @app.get("/")
+        def index():
+            return FileResponse(WEB_DIST / "index.html")
+
+    return app
+
+
+def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
+    """One dashboard's API. `cfg` is bound to the dashboard."""
     store = Store(cfg)
     detail_builder = dashboard.detail(store) if dashboard.detail else None
     metrics, metrics_by_id, resolve = dashboard.metrics, dashboard.metrics_by_id, dashboard.resolve
     strata, completeness_flags = dashboard.strata, dashboard.completeness
-    ltvv_thresholds = store.meta["ltvv_thresholds"]
-    app = FastAPI(title="CLIF ICU quality dashboard", docs_url="/api/docs", openapi_url="/api/openapi.json")
+    ltvv_thresholds = store.meta.get("ltvv_thresholds", [])
+    router = APIRouter()
 
     def filtered(request: Request) -> tuple[pd.DataFrame, pd.DataFrame]:
         filters = parse_filters(request)
@@ -57,9 +82,10 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
     def months_of(*frames) -> list[str]:
         return sorted(set().union(*(set(f["month"].dropna()) for f in frames)))
 
-    @app.get("/api/meta")
+    @router.get("/meta")
     def meta():
         return jsonable({
+            "dashboard": {"id": dashboard.id, "title": dashboard.title, "detail": detail_builder is not None},
             "meta": store.meta, "decisions": store.decisions, "funnel": store.summary["funnel"],
             "proning_funnel": store.summary["proning_funnel"], "data_quality": store.summary["data_quality"],
             "metrics": [m.public() for m in metrics], "domains": dashboard.domains,
@@ -69,7 +95,7 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
             "n_episodes_total": int(len(store.episodes)), "small_cell_n": store.small_cell_n,
         })
 
-    @app.get("/api/overview")
+    @router.get("/overview")
     def overview(request: Request):
         episodes, proning = filtered(request)
         months = months_of(episodes, proning)
@@ -79,7 +105,7 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
             tiles[metric.id] = {"agg": agg.aggregate(metric, rows), "series": agg.monthly(metric, rows, months)}
         return jsonable({"n_episodes": len(episodes), "n_proning": len(proning), "months": months, "tiles": tiles})
 
-    @app.get("/api/metric/{route_id}")
+    @router.get("/metric/{route_id}")
     def metric_page(route_id: str, request: Request, stratum: str = Query("unit")):
         if stratum not in dict(strata):
             raise HTTPException(400, f"unknown stratum {stratum}")
@@ -114,7 +140,7 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
             "funnel": store.summary["proning_funnel" if metric.source == "proning" else "funnel"],
         })
 
-    @app.get("/api/units")
+    @router.get("/units")
     def units(request: Request):
         episodes, proning = filtered(request)
         unit_names = sorted(episodes["unit"].dropna().unique().tolist())
@@ -159,7 +185,7 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
                                 kind="stable").index
         return episodes.loc[order], note, numerator_column, threshold
 
-    @app.get("/api/episodes")
+    @router.get("/rows")
     def episode_list(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
                      q: str | None = None, sort: str = "start", direction: int = -1, offset: int = 0,
                      limit: int = Query(EPISODE_PAGE_SIZE, le=1000)):
@@ -168,7 +194,7 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
         return jsonable({"total": int(len(rows)), "offset": offset, "note": note, "ltvv_column": numerator_column,
                          "ltvv_threshold": threshold, "rows": page.to_dict("records")})
 
-    @app.get("/api/episodes.csv")
+    @router.get("/rows.csv")
     def episode_csv(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
                     q: str | None = None, sort: str = "start", direction: int = -1):
         rows, *_ = episode_selection(request, metric, field, value, q, sort, direction)
@@ -178,7 +204,7 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
         return StreamingResponse(iter([buffer.getvalue()]), media_type="text/csv",
                                  headers={"Content-Disposition": "attachment; filename=episodes.csv"})
 
-    @app.get("/api/timeline/{episode_id}")
+    @router.get("/detail/{episode_id}")
     def episode_timeline(episode_id: str):
         series = detail_builder.build(episode_id) if detail_builder else None
         if series is None:
@@ -194,7 +220,7 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
             "next": ids.iloc[position + 1] if position + 1 < len(ids) else None,
         })
 
-    @app.get("/api/quality")
+    @router.get("/quality")
     def quality(request: Request):
         episodes, _ = filtered(request)
         unit_names = sorted(episodes["unit"].dropna().unique().tolist())
@@ -208,11 +234,4 @@ def create_app(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Fas
         return jsonable({"units": unit_names, "completeness": completeness, "n_episodes": len(episodes),
                          "n_with_height": int(episodes["has_height"].sum())})
 
-    if WEB_DIST.exists():
-        app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
-
-        @app.get("/")
-        def index():
-            return FileResponse(WEB_DIST / "index.html")
-
-    return app
+    return router

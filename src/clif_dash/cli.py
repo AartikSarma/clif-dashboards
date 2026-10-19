@@ -43,7 +43,7 @@ def main(argv=None) -> None:
             parser.exit(1, f"No built dashboard found under {cfg.output_dir} (looked for "
                            f"{', '.join(d.id + '/summary.json' for d in dashboards)}). "
                            f"Run: uv run clif-dash build --config {args.config}\n")
-        uvicorn.run(create_app(cfg, built[0]), host=args.host, port=args.port)
+        uvicorn.run(create_app(cfg, built), host=args.host, port=args.port)
 
 
 def select_dashboards(parser: argparse.ArgumentParser, ids) -> list:
