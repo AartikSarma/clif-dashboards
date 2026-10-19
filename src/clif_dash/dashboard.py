@@ -85,7 +85,7 @@ class BuildResult:
 @dataclass(frozen=True)
 class Metric:
     id: str
-    source: str                      # which row table: "episodes" or "proning"
+    source: str                      # which row table (RowTable.name)
     kind: str                        # "ratio", "mean" or "median"
     numerator: str | None = None     # ratio numerator column, or the mean/median column
     denominator: str | None = None   # ratio denominator column; None means one per row
@@ -100,6 +100,23 @@ class Metric:
         return {"id": self.id, "source": self.source, "kind": self.kind, "numerator": self.numerator,
                 "denominator": self.denominator, "denLabel": self.den_label, "oe": self.expected,
                 "extra": list(self.extra), "parts": [list(p) for p in self.parts], "needs": list(self.needs)}
+
+
+@dataclass(frozen=True)
+class RowTable:
+    """One table of built rows that measures aggregate, as <name>.parquet in the dashboard folder.
+
+    The dashboard's first row table is its primary one: the rows its list page
+    shows, its units are taken from, and its detail view opens. Any other table
+    must carry the primary table's ID column, which links its rows back.
+    """
+    name: str                    # file name and Metric.source
+    id_column: str
+    unit: str                    # what one row is: "IMV episode"
+    unit_plural: str             # "IMV episodes"
+
+    def public(self) -> dict:
+        return {"name": self.name, "id_column": self.id_column, "unit": self.unit, "unit_plural": self.unit_plural}
 
 
 # --------------------------------------------------------------------------- #
@@ -117,6 +134,7 @@ class Dashboard:
     build: Callable[[SiteBuild], BuildResult]
     data_quality: Callable[[Any, SiteConfig], dict]      # (con, cfg): counts over whole source tables
     # Server
+    row_tables: tuple[RowTable, ...]                     # primary table first
     metrics: list[Metric]
     domains: list[str]
     strata: list[tuple[str, str]]

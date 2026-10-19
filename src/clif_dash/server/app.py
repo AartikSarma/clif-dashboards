@@ -24,8 +24,8 @@ from . import aggregate as agg
 from .store import FILTER_FIELDS, Filters, Store, jsonable
 
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
-EPISODE_PAGE_SIZE = 100
-# Episode-list columns computed from two fields: sort by the share they display
+ROW_PAGE_SIZE = 100
+# Respiratory list columns computed from two fields: sort by the share they display
 DERIVED_SORT = {"ltvv": ("ltvv_num", "ltvv_den"), "plat": ("plat_num", "plat_den"), "sat": ("sat_num", "sat_den"),
                 "sbt": ("sbt_num", "sbt_den"), "para8": ("para8_num", "para8_den")}
 
@@ -65,53 +65,56 @@ def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None) -> Fa
 
 def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
     """One dashboard's API. `cfg` is bound to the dashboard."""
-    store = Store(cfg)
+    store = Store(cfg, dashboard.row_tables)
     detail_builder = dashboard.detail(store) if dashboard.detail else None
     metrics, metrics_by_id, resolve = dashboard.metrics, dashboard.metrics_by_id, dashboard.resolve
     strata, completeness_flags = dashboard.strata, dashboard.completeness
+    primary, id_column = store.primary.name, store.primary.id_column
     ltvv_thresholds = store.meta.get("ltvv_thresholds", [])
     router = APIRouter()
 
-    def filtered(request: Request) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def filtered(request: Request) -> dict[str, pd.DataFrame]:
         filters = parse_filters(request)
-        return filters.apply(store.episodes), filters.apply(store.proning)
+        return {name: filters.apply(rows) for name, rows in store.tables.items()}
 
-    def rows_for(metric: Metric, episodes, proning):
-        return proning if metric.source == "proning" else episodes
+    def months_of(tables: dict[str, pd.DataFrame]) -> list[str]:
+        return sorted(set().union(*(set(rows["month"].dropna()) for rows in tables.values())))
 
-    def months_of(*frames) -> list[str]:
-        return sorted(set().union(*(set(f["month"].dropna()) for f in frames)))
+    def funnel_for(source: str):
+        """The primary table's cohort funnel is `funnel`; another table's is `<name>_funnel`."""
+        return store.summary.get("funnel" if source == primary else f"{source}_funnel")
 
     @router.get("/meta")
     def meta():
         return jsonable({
             "dashboard": {"id": dashboard.id, "title": dashboard.title, "detail": detail_builder is not None},
-            "meta": store.meta, "decisions": store.decisions, "funnel": store.summary["funnel"],
-            "proning_funnel": store.summary["proning_funnel"], "data_quality": store.summary["data_quality"],
+            "row_tables": [t.public() for t in dashboard.row_tables],
+            "meta": store.meta, "decisions": store.decisions, "data_quality": store.summary["data_quality"],
+            "funnels": {t.name: funnel_for(t.name) for t in dashboard.row_tables},
             "metrics": [m.public() for m in metrics], "domains": dashboard.domains,
-            "strata": [{"id": i, "label": label} for i, label in strata],
+            "strata": [{"id": i, "label": label} for i, label in strata if i in store.primary_rows.columns],
             "completeness": [list(c) for c in completeness_flags],
-            "filter_fields": [list(f) for f in FILTER_FIELDS], "filter_options": store.filter_options(),
-            "n_episodes_total": int(len(store.episodes)), "small_cell_n": store.small_cell_n,
+            "filter_fields": [list(f) for f in store.filter_fields()], "filter_options": store.filter_options(),
+            "n_total": int(len(store.primary_rows)), "small_cell_n": store.small_cell_n,
         })
 
     @router.get("/overview")
     def overview(request: Request):
-        episodes, proning = filtered(request)
-        months = months_of(episodes, proning)
+        tables = filtered(request)
+        months = months_of(tables)
         tiles = {}
         for metric in metrics:
-            rows = rows_for(metric, episodes, proning)
+            rows = tables[metric.source]
             tiles[metric.id] = {"agg": agg.aggregate(metric, rows), "series": agg.monthly(metric, rows, months)}
-        return jsonable({"n_episodes": len(episodes), "n_proning": len(proning), "months": months, "tiles": tiles})
+        return jsonable({**{f"n_{name}": len(rows) for name, rows in tables.items()}, "months": months, "tiles": tiles})
 
     @router.get("/metric/{route_id}")
     def metric_page(route_id: str, request: Request, stratum: str = Query("unit")):
         if stratum not in dict(strata):
             raise HTTPException(400, f"unknown stratum {stratum}")
-        episodes, proning = filtered(request)
+        tables = filtered(request)
         metric, threshold, default = resolve(route_id, store.decisions, ltvv_thresholds)
-        rows = rows_for(metric, episodes, proning)
+        rows = tables[metric.source]
         months = sorted(rows["month"].dropna().unique().tolist())
         series = agg.monthly(metric, rows, months)
         independent = metric.den_label in dashboard.independent_denominators
@@ -127,7 +130,8 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
                  for k in metric.extra]
         parts = [{"key": k, "label": label, **agg.aggregate(Metric(metric.id, metric.source, "ratio", k, metric.denominator), rows)}
                  for k, label in metric.parts]
-        completeness = [{"key": k, "label": label, "n": int(episodes[k].sum()), "total": int(len(episodes))}
+        primary_rows = tables[primary]
+        completeness = [{"key": k, "label": label, "n": int(primary_rows[k].sum()), "total": int(len(primary_rows))}
                         for k, label in completeness_flags if k in metric.needs]
         return jsonable({
             "metric": metric.public(), "threshold": threshold, "default_threshold": default,
@@ -137,101 +141,104 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "thresholds": thresholds, "extra": extra, "parts": parts, "strata": groups,
             "lines": [{"key": k, "points": agg.monthly(metric, rows[labels == k], months)} for k in top_keys],
             "completeness": completeness,
-            "funnel": store.summary["proning_funnel" if metric.source == "proning" else "funnel"],
+            "funnel": funnel_for(metric.source),
         })
 
     @router.get("/units")
     def units(request: Request):
-        episodes, proning = filtered(request)
-        unit_names = sorted(episodes["unit"].dropna().unique().tolist())
+        tables = filtered(request)
+        unit_names = sorted(tables[primary]["unit"].dropna().unique().tolist())
         table = []
         for metric in metrics:
-            rows = rows_for(metric, episodes, proning)
+            rows = tables[metric.source]
             cells = {g["key"]: g for g in agg.by_group(metric, rows, "unit", keys=unit_names)}
             table.append({"id": metric.id, "all": agg.aggregate(metric, rows), "cells": cells})
         return jsonable({"units": unit_names, "rows": table})
 
-    def episode_selection(request: Request, metric_arg: str | None, field: str | None, value: str | None,
-                          search: str | None, sort: str, direction: int):
-        episodes, proning = filtered(request)
+    def row_selection(request: Request, metric_arg: str | None, field: str | None, value: str | None,
+                      search: str | None, sort: str, direction: int):
+        tables = filtered(request)
+        selected = tables[primary]
         note, numerator_column, threshold = None, "ltvv_num", None
         if metric_arg and metric_arg.split("@")[0] in metrics_by_id:
             metric, threshold, _ = resolve(metric_arg, store.decisions, ltvv_thresholds)
             if threshold is not None:
                 numerator_column = metric.numerator
             title = store.decisions["metrics"][metric.id]["short"]
-            if metric.source == "proning":
-                chosen = (metric.missed(proning) if field == "missed"
-                          else proning[field].astype(object).where(proning[field].notna(), "Unknown") == value)
-                episodes = episodes[episodes["episode_id"].isin(proning.loc[chosen, "episode_id"])]
+            if metric.source != primary:
+                source = tables[metric.source]
+                chosen = (metric.missed(source) if field == "missed"
+                          else source[field].astype(object).where(source[field].notna(), "Unknown") == value)
+                selected = selected[selected[id_column].isin(source.loc[chosen, id_column])]
             elif field == "missed":
-                episodes = episodes[metric.missed(episodes)]
-            elif field in episodes.columns:
-                labels = episodes[field].astype(object).where(episodes[field].notna(), "Unknown")
-                episodes = episodes[labels == value]
-            note = f"Episodes that missed: {title}" if field == "missed" else f"{title} · {value}"
+                selected = selected[metric.missed(selected)]
+            elif field in selected.columns:
+                labels = selected[field].astype(object).where(selected[field].notna(), "Unknown")
+                selected = selected[labels == value]
+            note = f"{store.primary.unit_plural.capitalize()} that missed: {title}" if field == "missed" else f"{title} · {value}"
         if search:
-            hits = store.search_text.reindex(episodes["episode_id"]).str.contains(search.lower(), regex=False)
-            episodes = episodes[hits.to_numpy()]
-        if sort in DERIVED_SORT:
+            hits = store.search_text.reindex(selected[id_column]).str.contains(search.lower(), regex=False)
+            selected = selected[hits.to_numpy()]
+        if sort in DERIVED_SORT and DERIVED_SORT[sort][1] in selected.columns:
             num, den = DERIVED_SORT[sort]
             num = numerator_column if sort == "ltvv" else num
-            key = episodes[num] / episodes[den].where(episodes[den] > 0)
-        elif sort in episodes.columns:
-            key = episodes[sort]
+            key = selected[num] / selected[den].where(selected[den] > 0)
+        elif sort in selected.columns:
+            key = selected[sort]
         else:
-            key = episodes["start"]
+            key = selected["start" if "start" in selected.columns else id_column]
         order = key.sort_values(ascending=direction > 0, na_position="first" if direction > 0 else "last",
                                 kind="stable").index
-        return episodes.loc[order], note, numerator_column, threshold
+        return selected.loc[order], note, numerator_column, threshold
 
     @router.get("/rows")
-    def episode_list(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
-                     q: str | None = None, sort: str = "start", direction: int = -1, offset: int = 0,
-                     limit: int = Query(EPISODE_PAGE_SIZE, le=1000)):
-        rows, note, numerator_column, threshold = episode_selection(request, metric, field, value, q, sort, direction)
-        page = store.episode_display.loc[rows["episode_id"].iloc[offset:offset + limit]]
+    def row_list(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
+                 q: str | None = None, sort: str = "start", direction: int = -1, offset: int = 0,
+                 limit: int = Query(ROW_PAGE_SIZE, le=1000)):
+        rows, note, numerator_column, threshold = row_selection(request, metric, field, value, q, sort, direction)
+        page = store.displays[primary].loc[rows[id_column].iloc[offset:offset + limit]]
         return jsonable({"total": int(len(rows)), "offset": offset, "note": note, "ltvv_column": numerator_column,
                          "ltvv_threshold": threshold, "rows": page.to_dict("records")})
 
     @router.get("/rows.csv")
-    def episode_csv(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
-                    q: str | None = None, sort: str = "start", direction: int = -1):
-        rows, *_ = episode_selection(request, metric, field, value, q, sort, direction)
-        table = store.episode_display.loc[rows["episode_id"]].drop(columns=["episode_id"])
+    def row_csv(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
+                q: str | None = None, sort: str = "start", direction: int = -1):
+        rows, *_ = row_selection(request, metric, field, value, q, sort, direction)
+        table = store.displays[primary].loc[rows[id_column]].drop(columns=[id_column])
         buffer = io.StringIO()
         table.to_csv(buffer, index=False, quoting=csv.QUOTE_MINIMAL)
         return StreamingResponse(iter([buffer.getvalue()]), media_type="text/csv",
-                                 headers={"Content-Disposition": "attachment; filename=episodes.csv"})
+                                 headers={"Content-Disposition": f"attachment; filename={dashboard.id}_{primary}.csv"})
 
-    @router.get("/detail/{episode_id}")
-    def episode_timeline(episode_id: str):
-        series = detail_builder.build(episode_id) if detail_builder else None
+    @router.get("/detail/{row_id}")
+    def row_detail(row_id: str):
+        series = detail_builder.build(row_id) if detail_builder else None
         if series is None:
-            raise HTTPException(404, f"no episode {episode_id}")
-        episode = store.episode_display.loc[episode_id].to_dict()
-        proning_row = store.proning_display[store.proning_display["episode_id"] == episode_id]
-        ids = store.episode_display["episode_id"]
-        position = int((ids == episode_id).to_numpy().argmax())
+            raise HTTPException(404, f"no {store.primary.unit} {row_id}")
+        ids = store.displays[primary][id_column]
+        position = int((ids == row_id).to_numpy().argmax())
+        related = {}
+        for table in dashboard.row_tables[1:]:
+            match = store.displays[table.name][store.displays[table.name][id_column] == row_id]
+            related[table.name] = match.iloc[0].to_dict() if len(match) else None
         return jsonable({
-            "episode": episode, "series": series,
-            "proning": proning_row.iloc[0].to_dict() if len(proning_row) else None,
+            "row": store.displays[primary].loc[row_id].to_dict(), "series": series, **related,
             "previous": ids.iloc[position - 1] if position > 0 else None,
             "next": ids.iloc[position + 1] if position + 1 < len(ids) else None,
         })
 
     @router.get("/quality")
     def quality(request: Request):
-        episodes, _ = filtered(request)
-        unit_names = sorted(episodes["unit"].dropna().unique().tolist())
+        rows = filtered(request)[primary]
+        unit_names = sorted(rows["unit"].dropna().unique().tolist())
         completeness = []
         for key, label in completeness_flags:
             cells = {}
             for unit in [None, *unit_names]:
-                rows = episodes if unit is None else episodes[episodes["unit"] == unit]
-                cells[unit or "__all__"] = round(100 * rows[key].sum() / len(rows)) if len(rows) else None
+                unit_rows = rows if unit is None else rows[rows["unit"] == unit]
+                cells[unit or "__all__"] = round(100 * unit_rows[key].sum() / len(unit_rows)) if len(unit_rows) else None
             completeness.append({"key": key, "label": label, "cells": cells})
-        return jsonable({"units": unit_names, "completeness": completeness, "n_episodes": len(episodes),
-                         "n_with_height": int(episodes["has_height"].sum())})
+        return jsonable({"units": unit_names, "completeness": completeness, "n_rows": len(rows),
+                         "n_with_height": int(rows["has_height"].sum()) if "has_height" in rows.columns else None})
 
     return router

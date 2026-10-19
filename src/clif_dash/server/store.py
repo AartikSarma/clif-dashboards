@@ -1,8 +1,8 @@
 """Built outputs held in memory by the server, with the filters every page shares.
 
-The episode and proning tables are small (one row per IMV episode or proning
-patient), so the server keeps them as DataFrames. Timelines are not
-precomputed: the respiratory dashboard's timeline.py builds one from the staged chunk when it is asked for.
+A dashboard's row tables are small (one row per IMV episode, say), so the
+server keeps them as DataFrames. Detail views such as the respiratory timeline
+are not precomputed; the dashboard builds one from its staged data on request.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import SiteConfig
+from ..dashboard import RowTable
 
 FILTER_FIELDS = [("hospital", "Hospital"), ("unit", "ICU"), ("age_band", "Age band"), ("sex", "Sex"),
                  ("race_eth", "Race / ethnicity"), ("code_status", "Code status at IMV start")]
@@ -61,34 +62,49 @@ class Filters:
         return rows[keep]
 
 
+def display_rows(rows: pd.DataFrame, tz: str) -> pd.DataFrame:
+    """Rows as the list, CSV download and detail header show them: local times, no internal keys."""
+    display = rows.drop(columns=["encounter_block"], errors="ignore").copy()
+    for column in display.columns:
+        if isinstance(display[column].dtype, pd.DatetimeTZDtype):
+            display[column] = display[column].dt.tz_convert(tz).dt.strftime("%Y-%m-%d %H:%M")
+    return display
+
+
 class Store:
-    def __init__(self, cfg: SiteConfig):
+    """One dashboard's built row tables and summary. `cfg` is bound to the dashboard."""
+
+    def __init__(self, cfg: SiteConfig, row_tables: tuple[RowTable, ...]):
         self.cfg = cfg
         output = cfg.dashboard_dir
         self.summary = json.loads((output / "summary.json").read_text())
         self.decisions = self.summary["decisions"]
         self.meta = self.summary["meta"]
-        self.episodes = pd.read_parquet(output / "episodes.parquet")
-        self.proning = pd.read_parquet(output / "proning.parquet")
-        if self.proning.empty:
-            self.proning = pd.DataFrame(columns=["episode_id", "month"])
-        tz = cfg.site_timezone
-        # Display rows: what the episode list, CSV download and timeline header show
-        display = self.episodes.drop(columns=["encounter_block"]).copy()
-        for column in ("start", "end"):
-            display[column] = self.episodes[column].dt.tz_convert(tz).dt.strftime("%Y-%m-%d %H:%M")
-        self.episode_display = display.set_index("episode_id", drop=False)
-        records = jsonable(display.to_dict("records"))
+        self.row_tables = row_tables
+        self.primary = row_tables[0]
+        self.tables: dict[str, pd.DataFrame] = {}
+        self.displays: dict[str, pd.DataFrame] = {}
+        for table in row_tables:
+            rows = pd.read_parquet(output / f"{table.name}.parquet")
+            if rows.empty:
+                rows = pd.DataFrame(columns=[table.id_column, "month"])
+            self.tables[table.name] = rows
+            self.displays[table.name] = display_rows(rows, cfg.site_timezone).set_index(table.id_column, drop=False)
+        primary_display = self.displays[self.primary.name]
+        records = jsonable(primary_display.to_dict("records"))
         self.search_text = pd.Series(
             [" ".join("" if v is None else str(v) for v in r.values()).lower() for r in records],
-            index=display["episode_id"].to_numpy())
-        proning_display = self.proning.copy()
-        for column in ("t_enroll", "t_first_abg"):
-            if column in proning_display.columns:
-                proning_display[column] = proning_display[column].dt.tz_convert(tz).dt.strftime("%Y-%m-%d %H:%M")
-        self.proning_display = proning_display.drop(columns=["encounter_block"], errors="ignore")
+            index=primary_display[self.primary.id_column].to_numpy())
         self.small_cell_n = next((d["value"] for d in self.decisions["shared"] if d["id"] == "small_cell_n"), 11)
 
+    @property
+    def primary_rows(self) -> pd.DataFrame:
+        return self.tables[self.primary.name]
+
+    def filter_fields(self) -> list[tuple[str, str]]:
+        """The shared filters that this dashboard's primary rows carry."""
+        return [(column, label) for column, label in FILTER_FIELDS if column in self.primary_rows.columns]
+
     def filter_options(self) -> dict[str, list[str]]:
-        return {column: sorted(self.episodes[column].dropna().astype(str).unique().tolist())
-                for column, _ in FILTER_FIELDS}
+        return {column: sorted(self.primary_rows[column].dropna().astype(str).unique().tolist())
+                for column, _ in self.filter_fields()}

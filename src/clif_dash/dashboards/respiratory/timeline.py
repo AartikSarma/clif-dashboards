@@ -33,7 +33,7 @@ class TimelineBuilder:
         self.build = lru_cache(maxsize=cache_size)(self._build)
 
     def _build(self, episode_id: str) -> dict | None:
-        episodes = self.store.episodes
+        episodes = self.store.tables["episodes"]
         match = episodes[episodes["episode_id"] == episode_id]
         if match.empty:
             return None
