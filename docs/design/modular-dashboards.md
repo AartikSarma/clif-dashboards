@@ -1,6 +1,6 @@
 # Modular dashboards: design plan
 
-Branch: `modular-dashboards`. Status: Phases 0 and 1 done; Phase 2 done except small-cell suppression, which awaits a policy decision; Phase 3 proposed.
+Branch: `modular-dashboards`. Status: Phases 0, 1 and 2 done; Phase 3 proposed.
 
 ## Goal
 
@@ -125,7 +125,7 @@ One `build` invocation stitches encounters once and builds every dashboard in th
 - Done: a `rate` kind, scale × Σevents / Σexposure (per 1,000 patient-days or device-days), with u-chart limits; a rate's n counts the rows contributing exposure. Control limits now follow the kind: p-chart for a ratio, u-chart for a rate. `icu_stays` carries a test rate, deaths per 1,000 ICU days.
 - Done: dashboard-declared filters. The platform offers hospital, ICU, age band, sex and race/ethnicity; respiratory adds code status and the tracheostomy flag as `FilterField`s, either a multi-select over a column's values or a yes/no flag.
 - Done: variants and sorting from the measure. A measure declares `Variants` (the decision holding the default, the summary key listing built values, the numerator column per value), and `resolve_route` reads `<measure>@<value>` for any measure; missed rules receive the resolved measure; the list sorts by any pooled measure's per-row share. `DERIVED_SORT`, the dashboards' resolvers and the `ltvv_*` response keys are gone.
-- Open: small-cell suppression on the server. Today the server sends raw counts and `small_cell_n`, and the browser greys small groups. Suppressing them for wider sharing raises policy questions (who sees what, whether totals must be protected from back-calculation, whether row lists and timelines are served at all) that the maintainer should settle first.
+- Dropped: small-cell suppression on the server. The dashboards are for internal use only, by a site's own QI team, who already see patient-level rows; no PHI leaves a site (decided 2026-10-20). Small groups stay greyed and flagged, as now. If the consortium later pools results across sites, suppression belongs in that export step (an aggregate-only file with small cells removed and totals protected from back-calculation), not in the internal server.
 
 None of these moved a respiratory number; the oracle tests still pass unchanged. The server also refuses to start on a build older than its dashboard's measures, which would otherwise show a blank page.
 
