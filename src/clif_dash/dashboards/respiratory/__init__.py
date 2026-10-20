@@ -1,7 +1,7 @@
 """Respiratory failure on invasive ventilation: upstream's ICU quality dashboard."""
 from __future__ import annotations
 
-from ...dashboard import Dashboard, RowTable
+from ...dashboard import Dashboard, FilterField, RowTable
 from . import build, registry
 from .timeline import TimelineBuilder
 
@@ -18,6 +18,8 @@ RESPIRATORY = Dashboard(
     metrics=registry.METRICS,
     domains=registry.DOMAINS,
     strata=registry.STRATA,
+    filters=(FilterField("code_status", "Code status at IMV start"),
+             FilterField("trach", "Tracheostomy during episode", kind="flag")),
     completeness=registry.COMPLETENESS,
     independent_denominators=registry.INDEPENDENT_DENOMINATORS,
     resolve=registry.resolve,

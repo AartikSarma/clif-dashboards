@@ -43,8 +43,9 @@ function query(F, extra = {}) {
   const p = new URLSearchParams();
   if (F.from) p.set("from", F.from);
   if (F.to) p.set("to", F.to);
-  for (const [f] of META.filter_fields) for (const v of F[f] || []) p.append(f, v);
-  if (F.trach) p.set("trach", F.trach);
+  for (const [f, , kind] of META.filter_fields) {
+    if (kind === "flag") { if (F[f]) p.set(f, F[f]); } else for (const v of F[f] || []) p.append(f, v);
+  }
   for (const [k, v] of Object.entries(extra)) if (v != null && v !== "") p.set(k, v);
   const s = p.toString();
   return s ? `?${s}` : "";
@@ -157,17 +158,16 @@ function FilterRail({ F, setF, nEp, nTot }) {
         <option value="">Latest ({monthLabel(months[months.length - 1])})</option>
         {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
       </select>
-      {META.filter_fields.map(([f, lab]) => (
-        <MultiSelect key={f} label={lab} options={META.filter_options[f]} value={F[f]} onChange={(v) => setF({ ...F, [f]: v })} />
-      ))}
-      {META.trach_filter && (
-        <>
-          <label className="f-lab">Tracheostomy during episode</label>
-          <select value={F.trach || ""} onChange={(e) => setF({ ...F, trach: e.target.value || null })}>
+      {META.filter_fields.map(([f, lab, kind]) => (kind === "flag" ? (
+        <React.Fragment key={f}>
+          <label className="f-lab">{lab}</label>
+          <select value={F[f] || ""} onChange={(e) => setF({ ...F, [f]: e.target.value || null })}>
             <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
           </select>
-        </>
-      )}
+        </React.Fragment>
+      ) : (
+        <MultiSelect key={f} label={lab} options={META.filter_options[f]} value={F[f]} onChange={(v) => setF({ ...F, [f]: v })} />
+      )))}
       <p className="rail-note">Each row is one {PRIMARY.unit}. Filters apply to every page.</p>
     </aside>
   );

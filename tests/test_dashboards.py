@@ -62,3 +62,19 @@ def test_a_rate_measure_serves_with_u_chart_limits(client, built):
     assert page["agg"]["value"] == pytest.approx(1000 * stays["died"].sum() / stays["icu_days"].sum(), abs=1e-4)  # responses round to 4 places
     assert page["control"]["kind"] == "u"
     assert client.get("/api/icu_stays/metric/hospital_mortality").json()["control"]["kind"] == "p"
+
+
+def test_each_dashboard_declares_its_own_filters(client):
+    respiratory = client.get("/api/respiratory/meta").json()["filter_fields"]
+    assert respiratory[-2:] == [["code_status", "Code status at IMV start", "values"],
+                                ["trach", "Tracheostomy during episode", "flag"]]
+    everything = client.get("/api/respiratory/overview").json()
+    with_trach = client.get("/api/respiratory/overview", params={"trach": "yes"}).json()
+    without = client.get("/api/respiratory/overview", params={"trach": "no"}).json()
+    assert with_trach["n_episodes"] + without["n_episodes"] == everything["n_episodes"]
+    assert with_trach["n_proning"] == everything["n_proning"]   # proning rows carry no tracheostomy flag
+    stays = client.get("/api/icu_stays/meta").json()["filter_fields"]
+    assert "code_status" not in [f[0] for f in stays] and "trach" not in [f[0] for f in stays]
+    # A filter the dashboard does not declare is ignored rather than applied to a column that happens to exist
+    assert client.get("/api/icu_stays/overview", params={"trach": "yes"}).json()["n_stays"] == \
+        client.get("/api/icu_stays/overview").json()["n_stays"]

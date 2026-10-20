@@ -121,6 +121,17 @@ class RowTable:
         return {"name": self.name, "id_column": self.id_column, "unit": self.unit, "unit_plural": self.unit_plural}
 
 
+@dataclass(frozen=True)
+class FilterField:
+    """A filter in the left rail, applied to every row table that has the column."""
+    column: str
+    label: str
+    kind: str = "values"         # "values": any of the column's values; "flag": yes or no on a boolean column
+
+    def public(self) -> list:
+        return [self.column, self.label, self.kind]
+
+
 # --------------------------------------------------------------------------- #
 # The contract
 # --------------------------------------------------------------------------- #
@@ -140,6 +151,7 @@ class Dashboard:
     metrics: list[Metric]
     domains: list[str]
     strata: list[tuple[str, str]]
+    filters: tuple[FilterField, ...]                     # added after the platform's shared filters
     completeness: list[tuple[str, str]]
     independent_denominators: frozenset[str]             # denominators that get p-chart limits
     resolve: Callable                                    # (route_id, decisions, ltvv_thresholds) -> (metric, threshold, default)

@@ -15,10 +15,11 @@ import numpy as np
 import pandas as pd
 
 from ..config import SiteConfig
-from ..dashboard import RowTable
+from ..dashboard import FilterField, RowTable
 
-FILTER_FIELDS = [("hospital", "Hospital"), ("unit", "ICU"), ("age_band", "Age band"), ("sex", "Sex"),
-                 ("race_eth", "Race / ethnicity"), ("code_status", "Code status at IMV start")]
+# Filters every dashboard offers when its primary rows carry the column; each dashboard adds its own
+SHARED_FILTERS = (FilterField("hospital", "Hospital"), FilterField("unit", "ICU"), FilterField("age_band", "Age band"),
+                  FilterField("sex", "Sex"), FilterField("race_eth", "Race / ethnicity"))
 
 
 def jsonable(value):
@@ -44,8 +45,8 @@ def jsonable(value):
 class Filters:
     month_from: str | None = None
     month_to: str | None = None
-    values: dict[str, list[str]] = field(default_factory=dict)
-    trach: str | None = None   # "yes", "no" or None
+    values: dict[str, list[str]] = field(default_factory=dict)   # column -> allowed values
+    flags: dict[str, bool] = field(default_factory=dict)         # column -> required value
 
     def apply(self, rows: pd.DataFrame) -> pd.DataFrame:
         keep = pd.Series(True, index=rows.index)
@@ -56,9 +57,11 @@ class Filters:
         for column, allowed in self.values.items():
             if allowed and column in rows.columns:
                 keep &= rows[column].isin(allowed)
-        # Proning rows carry no tracheostomy flag, so this filter leaves them alone (as upstream did)
-        if self.trach in ("yes", "no") and "trach" in rows.columns:
-            keep &= rows["trach"] == (self.trach == "yes")
+        # A table without the column is left alone: respiratory proning rows carry no
+        # tracheostomy flag, and upstream did not filter them by it
+        for column, required in self.flags.items():
+            if column in rows.columns:
+                keep &= rows[column] == required
         return rows[keep]
 
 
@@ -74,13 +77,14 @@ def display_rows(rows: pd.DataFrame, tz: str) -> pd.DataFrame:
 class Store:
     """One dashboard's built row tables and summary. `cfg` is bound to the dashboard."""
 
-    def __init__(self, cfg: SiteConfig, row_tables: tuple[RowTable, ...]):
+    def __init__(self, cfg: SiteConfig, row_tables: tuple[RowTable, ...], filters: tuple[FilterField, ...] = ()):
         self.cfg = cfg
         output = cfg.dashboard_dir
         self.summary = json.loads((output / "summary.json").read_text())
         self.decisions = self.summary["decisions"]
         self.meta = self.summary["meta"]
         self.row_tables = row_tables
+        self.dashboard_filters = filters
         self.primary = row_tables[0]
         self.tables: dict[str, pd.DataFrame] = {}
         self.displays: dict[str, pd.DataFrame] = {}
@@ -101,10 +105,10 @@ class Store:
     def primary_rows(self) -> pd.DataFrame:
         return self.tables[self.primary.name]
 
-    def filter_fields(self) -> list[tuple[str, str]]:
-        """The shared filters that this dashboard's primary rows carry."""
-        return [(column, label) for column, label in FILTER_FIELDS if column in self.primary_rows.columns]
+    def filter_fields(self) -> list[FilterField]:
+        """The shared filters this dashboard's primary rows carry, then the dashboard's own."""
+        return [f for f in (*SHARED_FILTERS, *self.dashboard_filters) if f.column in self.primary_rows.columns]
 
     def filter_options(self) -> dict[str, list[str]]:
-        return {column: sorted(self.primary_rows[column].dropna().astype(str).unique().tolist())
-                for column, _ in self.filter_fields()}
+        return {f.column: sorted(self.primary_rows[f.column].dropna().astype(str).unique().tolist())
+                for f in self.filter_fields() if f.kind == "values"}

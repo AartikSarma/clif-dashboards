@@ -80,6 +80,7 @@ ICU_STAYS = Dashboard(
     domains=["ICU stays"],
     strata=[("unit", "ICU"), ("hospital", "Hospital"), ("sex", "Sex"), ("race_eth", "Race / ethnicity"),
             ("age_band", "Age band")],
+    filters=(),
     completeness=[],
     independent_denominators=frozenset({"ICU stays", "ICU days"}),
     resolve=resolve,

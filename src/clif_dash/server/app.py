@@ -18,10 +18,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import SiteConfig
-from ..dashboard import Dashboard, Metric
+from ..dashboard import Dashboard, FilterField, Metric
 from ..dashboards import DASHBOARDS
 from . import aggregate as agg
-from .store import FILTER_FIELDS, Filters, Store, jsonable
+from .store import Filters, Store, jsonable
 
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 ROW_PAGE_SIZE = 100
@@ -30,13 +30,15 @@ DERIVED_SORT = {"ltvv": ("ltvv_num", "ltvv_den"), "plat": ("plat_num", "plat_den
                 "sbt": ("sbt_num", "sbt_den"), "para8": ("para8_num", "para8_den")}
 
 
-def parse_filters(request: Request) -> Filters:
+def parse_filters(request: Request, fields: list[FilterField]) -> Filters:
+    """Filters from the query string: repeated values (?unit=A&unit=B) or a flag (?trach=yes)."""
     params = request.query_params
     return Filters(
         month_from=params.get("from") or None,
         month_to=params.get("to") or None,
-        values={column: params.getlist(column) for column, _ in FILTER_FIELDS if params.getlist(column)},
-        trach=params.get("trach") or None,
+        values={f.column: params.getlist(f.column) for f in fields if f.kind == "values" and params.getlist(f.column)},
+        flags={f.column: params.get(f.column) == "yes" for f in fields
+               if f.kind == "flag" and params.get(f.column) in ("yes", "no")},
     )
 
 
@@ -65,7 +67,8 @@ def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None) -> Fa
 
 def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
     """One dashboard's API. `cfg` is bound to the dashboard."""
-    store = Store(cfg, dashboard.row_tables)
+    store = Store(cfg, dashboard.row_tables, dashboard.filters)
+    filter_fields = store.filter_fields()
     detail_builder = dashboard.detail(store) if dashboard.detail else None
     metrics, metrics_by_id, resolve = dashboard.metrics, dashboard.metrics_by_id, dashboard.resolve
     strata, completeness_flags = dashboard.strata, dashboard.completeness
@@ -74,7 +77,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
     router = APIRouter()
 
     def filtered(request: Request) -> dict[str, pd.DataFrame]:
-        filters = parse_filters(request)
+        filters = parse_filters(request, filter_fields)
         return {name: filters.apply(rows) for name, rows in store.tables.items()}
 
     def months_of(tables: dict[str, pd.DataFrame]) -> list[str]:
@@ -94,8 +97,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "metrics": [m.public() for m in metrics], "domains": dashboard.domains,
             "strata": [{"id": i, "label": label} for i, label in strata if i in store.primary_rows.columns],
             "completeness": [list(c) for c in completeness_flags],
-            "filter_fields": [list(f) for f in store.filter_fields()], "filter_options": store.filter_options(),
-            "trach_filter": "trach" in store.primary_rows.columns,
+            "filter_fields": [f.public() for f in filter_fields], "filter_options": store.filter_options(),
             "n_total": int(len(store.primary_rows)), "small_cell_n": store.small_cell_n,
         })
 
