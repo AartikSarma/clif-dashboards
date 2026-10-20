@@ -1,6 +1,6 @@
 # Modular dashboards: design plan
 
-Branch: `modular-dashboards`. Status: Phases 0 and 1 done; Phases 2 and 3 proposed.
+Branch: `modular-dashboards`. Status: Phases 0 and 1 done; Phase 2 done except small-cell suppression, which awaits a policy decision; Phase 3 proposed.
 
 ## Goal
 
@@ -79,9 +79,9 @@ class Dashboard:
     metrics: list[Metric]
     domains: list[str]
     strata: list[tuple[str, str]]
+    filters: tuple[FilterField, ...]   # added after the shared hospital, ICU, age, sex, race/ethnicity filters
     completeness: list[tuple[str, str]]
-    independent_denominators: frozenset[str]
-    resolve: Callable                  # route id -> (metric, threshold, default)
+    independent_denominators: frozenset[str]   # denominators that get p- or u-chart limits
     row_tables: tuple[RowTable, ...]   # primary first: name, ID column, unit label
     detail: Callable | None = None     # (store) -> builder with .build(row_id); respiratory: timelines
 ```
@@ -112,7 +112,7 @@ One `build` invocation stitches encounters once and builds every dashboard in th
 
 `/api/dashboards` lists the dashboards whose builds exist. Every route sits under a prefix: `/api/{dashboard}/meta`, `/overview`, `/metric/{id}`, `/units`, `/rows`, `/rows.csv`, `/detail/{row_id}`, `/quality`. `/rows` lists the primary table. The UI's hash routes carry the same segment (`#/respiratory/metric/ltvv@7`); a hash without one, from an old bookmark, gets the first dashboard's id. The header title and page labels come from `meta`, and a landing page lists the dashboards when there are several. The filter rail offers only the shared filters the dashboard's rows carry. A dashboard with no `detail` builder gets no Timeline tab.
 
-`/overview` counts each table as `n_<table>`, which keeps the `n_episodes` and `n_proning` keys `test_server.py` reads. `/rows` still returns `ltvv_column` and `ltvv_threshold`; Phase 2 replaces them with the sorting and threshold work. Respiratory-specific page copy also remains in the UI (the data-quality notes, the observed/expected explanations); it shows only when a dashboard's data carry those fields.
+`/overview` counts each table as `n_<table>`, which keeps the `n_episodes` and `n_proning` keys `test_server.py` reads. Respiratory-specific page copy also remains in the UI (the data-quality notes, the observed/expected explanations); it shows only when a dashboard's data carry those fields.
 
 ## Phases
 
@@ -122,12 +122,12 @@ One `build` invocation stitches encounters once and builds every dashboard in th
 
 **Phase 2: generalize what the second module will need.** Four changes, each with its own tests:
 
-- A `rate` aggregation kind: scale × Σevents / Σexposure (per 1,000 patient-days or device-days), with u-chart limits. Infection and stewardship measures are rates, and the current p-chart is wrong for them.
-- Module-declared filters, so `trach` and `code_status` leave the platform.
-- Sorting and threshold variants from the registry. `DERIVED_SORT` and the `ltvv@` syntax become properties of a measure (its numerator and denominator; a list of parameter values), not code in `app.py`.
-- Small-cell suppression on the server. Today the server sends raw counts and `small_cell_n`, and the browser decides what to hide. With several dashboards and wider hosting, suppression belongs in one place, before the response leaves the server.
+- Done: a `rate` kind, scale × Σevents / Σexposure (per 1,000 patient-days or device-days), with u-chart limits; a rate's n counts the rows contributing exposure. Control limits now follow the kind: p-chart for a ratio, u-chart for a rate. `icu_stays` carries a test rate, deaths per 1,000 ICU days.
+- Done: dashboard-declared filters. The platform offers hospital, ICU, age band, sex and race/ethnicity; respiratory adds code status and the tracheostomy flag as `FilterField`s, either a multi-select over a column's values or a yes/no flag.
+- Done: variants and sorting from the measure. A measure declares `Variants` (the decision holding the default, the summary key listing built values, the numerator column per value), and `resolve_route` reads `<measure>@<value>` for any measure; missed rules receive the resolved measure; the list sorts by any pooled measure's per-row share. `DERIVED_SORT`, the dashboards' resolvers and the `ltvv_*` response keys are gone.
+- Open: small-cell suppression on the server. Today the server sends raw counts and `small_cell_n`, and the browser greys small groups. Suppressing them for wider sharing raises policy questions (who sees what, whether totals must be protected from back-calculation, whether row lists and timelines are served at all) that the maintainer should settle first.
 
-None of these may move a respiratory number; the oracle tests guard that.
+None of these moved a respiratory number; the oracle tests still pass unchanged. The server also refuses to start on a build older than its dashboard's measures, which would otherwise show a blank page.
 
 **Phase 3: the second real module.** See the next section for which one.
 
