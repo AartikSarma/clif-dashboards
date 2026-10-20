@@ -21,6 +21,9 @@ let PRIMARY = null; // the dashboard's primary row table: { name, id_column, uni
 const api = (path) => `/api/${DASH}${path}`;
 const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 const countOf = (n, table) => `${n} ${n === 1 ? table.unit : table.unit_plural}`;
+// Ratios and rates both pool a numerator over a denominator; means and medians report n.
+const pooled = (m) => m.kind === "ratio" || m.kind === "rate";
+const whole = (v) => (v == null ? 0 : Math.round(v).toLocaleString());
 
 function setDashboard(id, meta) {
   DASH = id;
@@ -220,7 +223,7 @@ function Overview({ F }) {
                       </div>
                       <div className="tile-val">{fmt(a.value, meta)}</div>
                       <div className="tile-sub">
-                        {m.kind === "ratio" ? `${a.num ?? 0} / ${a.den ?? 0} ${m.denLabel}` : `n ${a.n} ${m.denLabel}`}
+                        {pooled(m) ? `${whole(a.num)} / ${whole(a.den)} ${m.denLabel}` : `n ${a.n} ${m.denLabel}`}
                         {a.oe != null && <span> · O/E {a.oe.toFixed(2)}</span>}
                       </div>
                       <div className="tile-foot">
@@ -267,8 +270,8 @@ function DecisionsPanel({ meta, agg, m }) {
     <section className="card decisions" aria-labelledby="dec-h">
       <h2 id="dec-h">How this is calculated</h2>
       <div className="numden">
-        <div><span className="nd-k">Numerator</span><span>{meta.numerator}</span>{m.kind === "ratio" && <b className="nd-v">{agg.num}</b>}</div>
-        <div><span className="nd-k">Denominator</span><span>{meta.denominator}</span>{m.kind === "ratio" ? <b className="nd-v">{agg.den}</b> : <b className="nd-v">n {agg.n}</b>}</div>
+        <div><span className="nd-k">Numerator</span><span>{meta.numerator}</span>{pooled(m) && <b className="nd-v">{whole(agg.num)}</b>}</div>
+        <div><span className="nd-k">Denominator</span><span>{meta.denominator}</span>{pooled(m) ? <b className="nd-v">{whole(agg.den)}</b> : <b className="nd-v">n {agg.n}</b>}</div>
         <div><span className="nd-k">Target</span><span>{meta.target != null ? `${meta.target_op || (meta.direction === "lower" ? "≤" : "≥")} ${fmt(meta.target, meta)}` : `None set — add one under this metric in config/decisions/${DASH}.yaml`}</span></div>
       </div>
       <h3>Decisions for this measure</h3>
@@ -325,7 +328,7 @@ function MetricPage({ id, F }) {
                 <span className="big">{f(agg.value)}</span>
                 <StatusChip s={s} meta={meta} />
                 <span className="muted">
-                  {m.kind === "ratio" ? `${agg.num} of ${agg.den} ${m.denLabel}` : `${m.kind} of ${agg.n} ${m.denLabel}${agg.q1 != null ? ` · IQR ${f(agg.q1)}–${f(agg.q3)}` : ""}`}
+                  {pooled(m) ? `${whole(agg.num)} ${m.kind === "rate" ? "per" : "of"} ${whole(agg.den)} ${m.denLabel}` : `${m.kind} of ${agg.n} ${m.denLabel}${agg.q1 != null ? ` · IQR ${f(agg.q1)}–${f(agg.q3)}` : ""}`}
                 </span>
               </div>
               {agg.oe != null && (
@@ -361,7 +364,7 @@ function MetricPage({ id, F }) {
               <button className="btn" onClick={() => downloadCSV(`${routeId.replace("@", "_le")}_by_month.csv`, series.map((p) => ({ month: p.month, value: p.value, numerator: p.num, denominator: p.den, n: p.n })))}>Download CSV</button>
             </div>
             <p className="muted small">
-              {control ? "p-chart: the shaded bar behind each month is its 3-sigma control limit around the overall mean; red points fall outside it. " : m.kind === "ratio" ? `Control limits are not drawn because ${m.denLabel} are clustered within patients, which would make limits falsely narrow. ` : `Monthly ${m.kind}. `}
+              {control ? `${control.kind}-chart: the shaded bar behind each month is its 3-sigma control limit around the overall ${m.kind === "rate" ? "rate" : "mean"}; red points fall outside it. ` : pooled(m) ? `Control limits are not drawn because ${m.denLabel} are clustered within patients, which would make limits falsely narrow. ` : `Monthly ${m.kind}. `}
               Hollow points have n &lt; {MIN_N}.
             </p>
             {series.some((p) => p.value != null) ? (
@@ -396,10 +399,10 @@ function MetricPage({ id, F }) {
             )}
             {view === "table" && (
               <table className="dtable num">
-                <thead><tr><th>{stratLabel}</th><th>Value</th>{m.kind === "ratio" && <th>Numerator</th>}<th>{m.kind === "ratio" ? "Denominator" : "n"}</th>{m.oe && <th>Expected</th>}{m.oe && <th>O/E</th>}</tr></thead>
+                <thead><tr><th>{stratLabel}</th><th>Value</th>{pooled(m) && <th>Numerator</th>}<th>{pooled(m) ? "Denominator" : "n"}</th>{m.oe && <th>Expected</th>}{m.oe && <th>O/E</th>}</tr></thead>
                 <tbody>{strata.map((r) => (
                   <tr key={r.key} className={(r.n || 0) < MIN_N ? "row-small" : ""}>
-                    <td>{r.key}</td><td>{f(r.value)}</td>{m.kind === "ratio" && <td>{r.num}</td>}<td>{m.kind === "ratio" ? r.den : r.n}</td>
+                    <td>{r.key}</td><td>{f(r.value)}</td>{pooled(m) && <td>{whole(r.num)}</td>}<td>{pooled(m) ? whole(r.den) : r.n}</td>
                     {m.oe && <td>{f(r.expected)}</td>}{m.oe && <td>{r.oe != null ? r.oe.toFixed(2) : "—"}</td>}
                   </tr>))}
                 </tbody>

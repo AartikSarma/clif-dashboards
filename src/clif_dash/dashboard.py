@@ -86,20 +86,22 @@ class BuildResult:
 class Metric:
     id: str
     source: str                      # which row table (RowTable.name)
-    kind: str                        # "ratio", "mean" or "median"
-    numerator: str | None = None     # ratio numerator column, or the mean/median column
-    denominator: str | None = None   # ratio denominator column; None means one per row
+    kind: str                        # "ratio", "rate", "mean" or "median"
+    numerator: str | None = None     # ratio numerator or rate events column, or the mean/median column
+    denominator: str | None = None   # ratio denominator or rate exposure column; for a ratio, None means one per row
     den_label: str = "episodes"
     expected: str | None = None      # column with each row's expected probability (O/E)
     extra: tuple[str, ...] = ()      # further one-per-row ratios shown beside the headline
     parts: tuple[tuple[str, str], ...] = ()  # (numerator column, label) sharing the denominator
     needs: tuple[str, ...] = ()      # completeness flags this measure depends on
+    scale: float = 1000.0            # a rate's events are per this much exposure (per 1,000 patient-days)
     missed: MissedRule = field(default=lambda rows: pd.Series(False, index=rows.index), compare=False)
 
     def public(self) -> dict:
         return {"id": self.id, "source": self.source, "kind": self.kind, "numerator": self.numerator,
                 "denominator": self.denominator, "denLabel": self.den_label, "oe": self.expected,
-                "extra": list(self.extra), "parts": [list(p) for p in self.parts], "needs": list(self.needs)}
+                "extra": list(self.extra), "parts": [list(p) for p in self.parts], "needs": list(self.needs),
+                "scale": self.scale if self.kind == "rate" else None}
 
 
 @dataclass(frozen=True)

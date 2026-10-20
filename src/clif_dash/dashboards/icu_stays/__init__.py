@@ -20,6 +20,8 @@ METRICS = [
            missed=lambda rows: rows["died"].fillna(0) > 0),
     Metric("icu_days", "stays", "median", "icu_days", den_label="ICU stays",
            missed=lambda rows: rows["icu_days"] > 7),
+    Metric("deaths_per_icu_days", "stays", "rate", "died", "icu_days", "ICU days", scale=1000,
+           missed=lambda rows: rows["died"].fillna(0) > 0),
 ]
 
 
@@ -79,6 +81,6 @@ ICU_STAYS = Dashboard(
     strata=[("unit", "ICU"), ("hospital", "Hospital"), ("sex", "Sex"), ("race_eth", "Race / ethnicity"),
             ("age_band", "Age band")],
     completeness=[],
-    independent_denominators=frozenset({"ICU stays"}),
+    independent_denominators=frozenset({"ICU stays", "ICU days"}),
     resolve=resolve,
 )

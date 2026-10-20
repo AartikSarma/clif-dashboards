@@ -138,7 +138,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "metric": metric.public(), "threshold": threshold, "default_threshold": default,
             "route_id": f"ltvv@{threshold:g}" if threshold is not None else metric.id,
             "agg": agg.aggregate(metric, rows), "months": months, "series": series,
-            "control": agg.p_chart(series) if metric.kind == "ratio" and independent else None,
+            "control": agg.control_limits(metric, series) if independent else None,
             "thresholds": thresholds, "extra": extra, "parts": parts, "strata": groups,
             "lines": [{"key": k, "points": agg.monthly(metric, rows[labels == k], months)} for k in top_keys],
             "completeness": completeness,

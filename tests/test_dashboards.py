@@ -6,6 +6,7 @@ fails wherever the server still assumes them.
 """
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -51,3 +52,13 @@ def test_filters_and_strata_follow_each_dashboard(client):
     assert client.get("/api/icu_stays/detail/anything").status_code == 404
     respiratory = client.get("/api/respiratory/meta").json()
     assert "code_status" in [f[0] for f in respiratory["filter_fields"]]
+
+
+def test_a_rate_measure_serves_with_u_chart_limits(client, built):
+    cfg, _, _ = built
+    stays = pd.read_parquet(cfg.bind("icu_stays").dashboard_dir / "stays.parquet")
+    page = client.get("/api/icu_stays/metric/deaths_per_icu_days").json()
+    assert page["metric"]["kind"] == "rate" and page["metric"]["scale"] == 1000
+    assert page["agg"]["value"] == pytest.approx(1000 * stays["died"].sum() / stays["icu_days"].sum(), abs=1e-4)  # responses round to 4 places
+    assert page["control"]["kind"] == "u"
+    assert client.get("/api/icu_stays/metric/hospital_mortality").json()["control"]["kind"] == "p"

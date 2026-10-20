@@ -41,6 +41,18 @@ metrics:
     denominator: Adult encounters with any ICU stay
     decisions: []
 
+  deaths_per_icu_days:
+    number: T3
+    domain: ICU stays
+    title: Hospital deaths per 1,000 ICU days
+    short: Deaths per 1,000 ICU days
+    unit: per 1,000 ICU days
+    direction: lower
+    target: null
+    numerator: Encounters discharged as expired
+    denominator: ICU days (hours in ICU locations ÷ 24), summed over adult encounters with any ICU stay
+    decisions: []
+
 changelog:
   - date: 2026-10-19
     change: Added as a platform test dashboard
