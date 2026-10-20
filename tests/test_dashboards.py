@@ -78,3 +78,30 @@ def test_each_dashboard_declares_its_own_filters(client):
     # A filter the dashboard does not declare is ignored rather than applied to a column that happens to exist
     assert client.get("/api/icu_stays/overview", params={"trach": "yes"}).json()["n_stays"] == \
         client.get("/api/icu_stays/overview").json()["n_stays"]
+
+
+def test_a_measure_variant_is_chosen_in_the_route(client):
+    meta = client.get("/api/respiratory/meta").json()
+    built = meta["meta"]["ltvv_thresholds"]
+    page = client.get("/api/respiratory/metric/ltvv@7").json()
+    assert page["route_id"] == "ltvv@7" and page["metric"]["numerator"] == "ltvv_num_7"
+    assert [t["threshold"] for t in page["thresholds"]] == built
+    default = page["default_threshold"]
+    for unknown in ("ltvv@99", "ltvv@seven", "ltvv"):
+        assert client.get(f"/api/respiratory/metric/{unknown}").json()["threshold"] == default, unknown
+    assert client.get("/api/respiratory/metric/plateau").json()["thresholds"] == []
+
+
+def shares(rows, numerator, denominator):
+    return [row[numerator] / row[denominator] if row[denominator] else None for row in rows]
+
+
+def test_the_list_sorts_by_each_rows_share_of_a_measure(client):
+    rows = client.get("/api/respiratory/rows", params={"sort": "plateau", "direction": 1, "limit": 1000}).json()["rows"]
+    values = [v for v in shares(rows, "plat_num", "plat_den") if v is not None]
+    assert values == sorted(values) and len(values) > 100
+    listed = client.get("/api/respiratory/rows", params={"metric": "ltvv@7", "sort": "ltvv", "direction": -1,
+                                                          "limit": 1000}).json()
+    assert listed["numerator_column"] == "ltvv_num_7" and listed["threshold"] == 7
+    values = [v for v in shares(listed["rows"], "ltvv_num_7", "ltvv_den") if v is not None]
+    assert values == sorted(values, reverse=True)

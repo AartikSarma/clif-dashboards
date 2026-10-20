@@ -22,6 +22,5 @@ RESPIRATORY = Dashboard(
              FilterField("trach", "Tracheostomy during episode", kind="flag")),
     completeness=registry.COMPLETENESS,
     independent_denominators=registry.INDEPENDENT_DENOMINATORS,
-    resolve=registry.resolve,
     detail=TimelineBuilder,
 )

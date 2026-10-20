@@ -18,16 +18,13 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import SiteConfig
-from ..dashboard import Dashboard, FilterField, Metric
+from ..dashboard import Dashboard, FilterField, Metric, resolve_route
 from ..dashboards import DASHBOARDS
 from . import aggregate as agg
 from .store import Filters, Store, jsonable
 
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 ROW_PAGE_SIZE = 100
-# Respiratory list columns computed from two fields: sort by the share they display
-DERIVED_SORT = {"ltvv": ("ltvv_num", "ltvv_den"), "plat": ("plat_num", "plat_den"), "sat": ("sat_num", "sat_den"),
-                "sbt": ("sbt_num", "sbt_den"), "para8": ("para8_num", "para8_den")}
 
 
 def parse_filters(request: Request, fields: list[FilterField]) -> Filters:
@@ -70,10 +67,9 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
     store = Store(cfg, dashboard.row_tables, dashboard.filters)
     filter_fields = store.filter_fields()
     detail_builder = dashboard.detail(store) if dashboard.detail else None
-    metrics, metrics_by_id, resolve = dashboard.metrics, dashboard.metrics_by_id, dashboard.resolve
+    metrics, metrics_by_id = dashboard.metrics, dashboard.metrics_by_id
     strata, completeness_flags = dashboard.strata, dashboard.completeness
     primary, id_column = store.primary.name, store.primary.id_column
-    ltvv_thresholds = store.meta.get("ltvv_thresholds", [])
     router = APIRouter()
 
     def filtered(request: Request) -> dict[str, pd.DataFrame]:
@@ -82,6 +78,9 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
 
     def months_of(tables: dict[str, pd.DataFrame]) -> list[str]:
         return sorted(set().union(*(set(rows["month"].dropna()) for rows in tables.values())))
+
+    def resolve(route_id: str):
+        return resolve_route(route_id, metrics, store.decisions, store.meta)
 
     def funnel_for(source: str):
         """The primary table's cohort funnel is `funnel`; another table's is `<name>_funnel`."""
@@ -116,7 +115,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         if stratum not in dict(strata):
             raise HTTPException(400, f"unknown stratum {stratum}")
         tables = filtered(request)
-        metric, threshold, default = resolve(route_id, store.decisions, ltvv_thresholds)
+        metric, threshold, default = resolve(route_id)
         rows = tables[metric.source]
         months = sorted(rows["month"].dropna().unique().tolist())
         series = agg.monthly(metric, rows, months)
@@ -126,9 +125,9 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         labels = rows[stratum].astype(object).where(rows[stratum].notna(), "Unknown") if len(rows) else rows[stratum]
         thresholds = []
         if threshold is not None:
-            for t in ltvv_thresholds:
-                variant, _, _ = resolve(f"ltvv@{t}", store.decisions, ltvv_thresholds)
-                thresholds.append({"threshold": t, "agg": agg.aggregate(variant, rows)})
+            for value in store.meta.get(metric.variants.built_values, []):
+                variant, _, _ = resolve(f"{metric.id}@{value}")
+                thresholds.append({"threshold": value, "agg": agg.aggregate(variant, rows)})
         extra = [{"key": k, **agg.aggregate(Metric(metric.id, metric.source, "ratio", k, None), rows)}
                  for k in metric.extra]
         parts = [{"key": k, "label": label, **agg.aggregate(Metric(metric.id, metric.source, "ratio", k, metric.denominator), rows)}
@@ -138,7 +137,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
                         for k, label in completeness_flags if k in metric.needs]
         return jsonable({
             "metric": metric.public(), "threshold": threshold, "default_threshold": default,
-            "route_id": f"ltvv@{threshold:g}" if threshold is not None else metric.id,
+            "route_id": f"{metric.id}@{threshold:g}" if threshold is not None else metric.id,
             "agg": agg.aggregate(metric, rows), "months": months, "series": series,
             "control": agg.control_limits(metric, series) if independent else None,
             "thresholds": thresholds, "extra": extra, "parts": parts, "strata": groups,
@@ -162,19 +161,20 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
                       search: str | None, sort: str, direction: int):
         tables = filtered(request)
         selected = tables[primary]
-        note, numerator_column, threshold = None, "ltvv_num", None
+        note, chosen_metric, numerator_column, threshold = None, None, None, None
         if metric_arg and metric_arg.split("@")[0] in metrics_by_id:
-            metric, threshold, _ = resolve(metric_arg, store.decisions, ltvv_thresholds)
+            metric, threshold, _ = resolve(metric_arg)
+            chosen_metric = metric
             if threshold is not None:
                 numerator_column = metric.numerator
             title = store.decisions["metrics"][metric.id]["short"]
             if metric.source != primary:
                 source = tables[metric.source]
-                chosen = (metric.missed(source) if field == "missed"
+                chosen = (metric.missed_rows(source) if field == "missed"
                           else source[field].astype(object).where(source[field].notna(), "Unknown") == value)
                 selected = selected[selected[id_column].isin(source.loc[chosen, id_column])]
             elif field == "missed":
-                selected = selected[metric.missed(selected)]
+                selected = selected[metric.missed_rows(selected)]
             elif field in selected.columns:
                 labels = selected[field].astype(object).where(selected[field].notna(), "Unknown")
                 selected = selected[labels == value]
@@ -182,10 +182,9 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         if search:
             hits = store.search_text.reindex(selected[id_column]).str.contains(search.lower(), regex=False)
             selected = selected[hits.to_numpy()]
-        if sort in DERIVED_SORT and DERIVED_SORT[sort][1] in selected.columns:
-            num, den = DERIVED_SORT[sort]
-            num = numerator_column if sort == "ltvv" else num
-            key = selected[num] / selected[den].where(selected[den] > 0)
+        sort_metric = sortable_metric(sort, chosen_metric)
+        if sort_metric is not None:
+            key = sort_metric.share(selected)
         elif sort in selected.columns:
             key = selected[sort]
         else:
@@ -194,14 +193,27 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
                                 kind="stable").index
         return selected.loc[order], note, numerator_column, threshold
 
+    def sortable_metric(sort: str, chosen: Metric | None) -> Metric | None:
+        """A pooled measure on the primary rows named by `sort` sorts by each row's own share.
+
+        The measure chosen for the list keeps its variant ("ltvv@7"), so the list sorts
+        by the share it shows.
+        """
+        metric_id = sort.split("@")[0]
+        if metric_id not in metrics_by_id:
+            return None
+        metric = chosen if chosen is not None and chosen.id == metric_id else resolve(sort)[0]
+        pooled = metric.kind in ("ratio", "rate") and metric.denominator is not None
+        return metric if pooled and metric.source == primary else None
+
     @router.get("/rows")
     def row_list(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
                  q: str | None = None, sort: str = "start", direction: int = -1, offset: int = 0,
                  limit: int = Query(ROW_PAGE_SIZE, le=1000)):
         rows, note, numerator_column, threshold = row_selection(request, metric, field, value, q, sort, direction)
         page = store.displays[primary].loc[rows[id_column].iloc[offset:offset + limit]]
-        return jsonable({"total": int(len(rows)), "offset": offset, "note": note, "ltvv_column": numerator_column,
-                         "ltvv_threshold": threshold, "rows": page.to_dict("records")})
+        return jsonable({"total": int(len(rows)), "offset": offset, "note": note, "numerator_column": numerator_column,
+                         "threshold": threshold, "rows": page.to_dict("records")})
 
     @router.get("/rows.csv")
     def row_csv(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,

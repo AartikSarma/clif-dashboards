@@ -17,11 +17,11 @@ from ...upstream import prep
 STAYS = RowTable("stays", "stay_id", "ICU stay", "ICU stays")
 METRICS = [
     Metric("hospital_mortality", "stays", "ratio", "died", None, "ICU stays",
-           missed=lambda rows: rows["died"].fillna(0) > 0),
+           missed=lambda rows, metric: rows["died"].fillna(0) > 0),
     Metric("icu_days", "stays", "median", "icu_days", den_label="ICU stays",
-           missed=lambda rows: rows["icu_days"] > 7),
+           missed=lambda rows, metric: rows["icu_days"] > 7),
     Metric("deaths_per_icu_days", "stays", "rate", "died", "icu_days", "ICU days", scale=1000,
-           missed=lambda rows: rows["died"].fillna(0) > 0),
+           missed=lambda rows, metric: rows["died"].fillna(0) > 0),
 ]
 
 
@@ -58,11 +58,6 @@ def build(site: SiteBuild) -> BuildResult:
                        meta={"months": sorted(rows["month"].dropna().unique().tolist())})
 
 
-def resolve(route_id: str, decisions: dict, ltvv_thresholds: list):
-    by_id = {m.id: m for m in METRICS}
-    return by_id.get(str(route_id), METRICS[0]), None, None
-
-
 def no_statistics(con, cfg: SiteConfig) -> dict:
     return {}
 
@@ -83,5 +78,4 @@ ICU_STAYS = Dashboard(
     filters=(),
     completeness=[],
     independent_denominators=frozenset({"ICU stays", "ICU days"}),
-    resolve=resolve,
 )

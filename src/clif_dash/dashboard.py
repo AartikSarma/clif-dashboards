@@ -11,7 +11,7 @@ from __future__ import annotations
 import resource
 import time
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,7 +21,8 @@ import pandas as pd
 from . import stage
 from .config import SiteConfig
 
-MissedRule = Callable[[pd.DataFrame], pd.Series]
+# Which rows missed a measure: (rows, the measure as resolved, variant included) -> boolean Series
+MissedRule = Callable[[pd.DataFrame, "Metric"], pd.Series]
 
 
 def log(message: str) -> None:
@@ -83,6 +84,18 @@ class BuildResult:
 # Measures
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
+class Variants:
+    """One measure computed at several values of a parameter, chosen in the route id ("ltvv@7").
+
+    The build computes a numerator column for each value and lists the values in
+    summary meta; the default is the value of one of the measure's decisions.
+    """
+    decision: str                    # id of the measure's decision that holds the default value
+    built_values: str                # summary meta key listing the values the build computed
+    column: Callable[[float], str]   # numerator column for a value
+
+
+@dataclass(frozen=True)
 class Metric:
     id: str
     source: str                      # which row table (RowTable.name)
@@ -95,13 +108,45 @@ class Metric:
     parts: tuple[tuple[str, str], ...] = ()  # (numerator column, label) sharing the denominator
     needs: tuple[str, ...] = ()      # completeness flags this measure depends on
     scale: float = 1000.0            # a rate's events are per this much exposure (per 1,000 patient-days)
-    missed: MissedRule = field(default=lambda rows: pd.Series(False, index=rows.index), compare=False)
+    variants: Variants | None = field(default=None, compare=False)
+    missed: MissedRule = field(default=lambda rows, metric: pd.Series(False, index=rows.index), compare=False)
+
+    def missed_rows(self, rows: pd.DataFrame) -> pd.Series:
+        return self.missed(rows, self)
+
+    def share(self, rows: pd.DataFrame) -> pd.Series:
+        """Each row's own numerator ÷ denominator (no value where the denominator is zero)."""
+        return rows[self.numerator] / rows[self.denominator].where(rows[self.denominator] > 0)
 
     def public(self) -> dict:
         return {"id": self.id, "source": self.source, "kind": self.kind, "numerator": self.numerator,
                 "denominator": self.denominator, "denLabel": self.den_label, "oe": self.expected,
                 "extra": list(self.extra), "parts": [list(p) for p in self.parts], "needs": list(self.needs),
-                "scale": self.scale if self.kind == "rate" else None}
+                "scale": self.scale if self.kind == "rate" else None, "variants": self.variants is not None}
+
+
+def resolve_route(route_id: str, metrics: list[Metric], decisions: dict, meta: dict):
+    """The measure a route id names, at the variant it asks for: "ltvv@7", or "plateau".
+
+    Returns (metric, value, default). An unknown measure falls back to the first;
+    a variant value the build did not compute falls back to the default. value and
+    default are None for a measure without variants.
+    """
+    metric_id, _, value_text = str(route_id).partition("@")
+    metric = next((m for m in metrics if m.id == metric_id), metrics[0])
+    if metric.variants is None:
+        return metric, None, None
+    variants = metric.variants
+    default = next(d["value"] for d in decisions["metrics"][metric.id]["decisions"] if d["id"] == variants.decision)
+    built = meta.get(variants.built_values, [])
+    try:
+        value = float(value_text) if value_text else default
+    except ValueError:
+        value = default
+    if value not in built:
+        value = default
+    numerator = variants.column(value) if value in built else metric.numerator
+    return replace(metric, numerator=numerator), value, default
 
 
 @dataclass(frozen=True)
@@ -154,7 +199,6 @@ class Dashboard:
     filters: tuple[FilterField, ...]                     # added after the platform's shared filters
     completeness: list[tuple[str, str]]
     independent_denominators: frozenset[str]             # denominators that get p-chart limits
-    resolve: Callable                                    # (route_id, decisions, ltvv_thresholds) -> (metric, threshold, default)
     detail: Callable | None = None                       # (store) -> builder with .build(row_id)
 
     @property

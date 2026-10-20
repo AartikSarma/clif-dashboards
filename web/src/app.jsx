@@ -318,7 +318,7 @@ function MetricPage({ id, F }) {
                   <span className="thr-lab">Threshold</span>
                   {data.thresholds.map(({ threshold: t, agg: a }) => (
                     <button key={t} className={t === thr ? "on" : ""} aria-pressed={t === thr}
-                      onClick={() => go("metric", `ltvv@${t}`)}>
+                      onClick={() => go("metric", `${m.id}@${t}`)}>
                       ≤ {t} mL/kg<span className="thr-v">{fmt(a.value, meta)}</span>{t === def && <span className="thr-def">default</span>}
                     </button>
                   ))}
@@ -519,16 +519,16 @@ const PAGE_SIZE = 100;
 const RESPIRATORY_LIST = {
   columns: (thr) => [
     ["label_id", "Hospitalization"], ["start", "IMV start"], ["unit", "ICU"], ["imv_days", "IMV days"],
-    ["vt_pbw_median", "Median Vt/PBW"], ["ltvv", thr != null ? `LTVV hours (≤ ${thr})` : "LTVV hours"], ["plat", "Plateau ≤ 30"], ["sat", "SAT days"],
-    ["sbt", "SBT days"], ["para8", "Paralytic > 8 h days"], ["reint_num", "Reintubated"], ["vfd28", "VFD-28"], ["discharge", "Discharge"],
+    ["vt_pbw_median", "Median Vt/PBW"], ["ltvv", thr != null ? `LTVV hours (≤ ${thr})` : "LTVV hours"], ["plateau", "Plateau ≤ 30"], ["sat", "SAT days"],
+    ["sbt", "SBT days"], ["paralytic_8h", "Paralytic > 8 h days"], ["reint_num", "Reintubated"], ["vfd28", "VFD-28"], ["discharge", "Discharge"],
   ],
   cell: (e, c, ltvvCol) => {
     switch (c) {
       case "ltvv": return e.ltvv_den ? `${Math.round((100 * (e[ltvvCol] ?? e.ltvv_num)) / e.ltvv_den)}% of ${e.ltvv_den} h` : <span className="muted">{e.has_height ? "—" : "no height"}</span>;
-      case "plat": return e.plat_den ? `${e.plat_num}/${e.plat_den}` : "—";
+      case "plateau": return e.plat_den ? `${e.plat_num}/${e.plat_den}` : "—";
       case "sat": return e.sat_den ? `${e.sat_num}/${e.sat_den}` : "—";
       case "sbt": return e.sbt_den ? `${e.sbt_num}/${e.sbt_den}` : "—";
-      case "para8": return e.para8_den ? `${e.para8_num}/${e.para8_den}` : "—";
+      case "paralytic_8h": return e.para8_den ? `${e.para8_num}/${e.para8_den}` : "—";
       case "reint_num": return e.ext_den ? (e.reint_num ? "Yes" : "No") : "—";
       default: return e[c] ?? "—";
     }
@@ -577,14 +577,14 @@ function Patients({ F, arg }) {
             {data.note && <p className="filter-note">{data.note} · <a href={route("patients")}>clear</a></p>}
             <div className="scroll-x">
               <table className="dtable list">
-                <thead><tr>{listColumns(data.ltvv_threshold, data.rows).map(([c, lab]) => (
+                <thead><tr>{listColumns(data.threshold, data.rows).map(([c, lab]) => (
                   <th key={c} onClick={() => setSort([c, sk === c ? -sd : 1])} className="sortable">
                     {lab}{sk === c ? (sd > 0 ? " ▲" : " ▼") : ""}
                   </th>))}</tr></thead>
                 <tbody>{data.rows.map((e) => (
                   <tr key={e[idColumn]} onClick={META.dashboard.detail ? () => go("timeline", e[idColumn]) : undefined}
                     className={META.dashboard.detail ? "clickable" : ""}>
-                    {listColumns(data.ltvv_threshold, data.rows).map(([c]) => <td key={c}>{cell(e, c, data.ltvv_column)}</td>)}
+                    {listColumns(data.threshold, data.rows).map(([c]) => <td key={c}>{cell(e, c, data.numerator_column)}</td>)}
                   </tr>))}
                 </tbody>
               </table>
