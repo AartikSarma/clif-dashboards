@@ -6,6 +6,10 @@ fails wherever the server still assumes them.
 """
 from __future__ import annotations
 
+import json
+import shutil
+from dataclasses import replace
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -105,3 +109,17 @@ def test_the_list_sorts_by_each_rows_share_of_a_measure(client):
     assert listed["numerator_column"] == "ltvv_num_7" and listed["threshold"] == 7
     values = [v for v in shares(listed["rows"], "ltvv_num_7", "ltvv_den") if v is not None]
     assert values == sorted(values, reverse=True)
+
+
+def test_a_build_older_than_its_measures_is_refused(built, tmp_path):
+    cfg, _, _ = built
+    build(cfg, ICU_STAYS)
+    old = replace(cfg, output_dir=tmp_path)
+    shutil.copytree(cfg.bind("icu_stays").dashboard_dir, old.bind("icu_stays").dashboard_dir,
+                    ignore=shutil.ignore_patterns("stage"))
+    summary_path = old.bind("icu_stays").dashboard_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    del summary["decisions"]["metrics"]["deaths_per_icu_days"]
+    summary_path.write_text(json.dumps(summary))
+    with pytest.raises(RuntimeError, match="deaths_per_icu_days"):
+        create_app(old, [ICU_STAYS])

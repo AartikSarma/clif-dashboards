@@ -65,6 +65,10 @@ def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None) -> Fa
 def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
     """One dashboard's API. `cfg` is bound to the dashboard."""
     store = Store(cfg, dashboard.row_tables, dashboard.filters)
+    undefined = [m.id for m in dashboard.metrics if m.id not in store.decisions["metrics"]]
+    if undefined:
+        raise RuntimeError(f"The {dashboard.id} build in {cfg.dashboard_dir} has no decisions for "
+                           f"{', '.join(undefined)}: it predates these measures. Rebuild it.")
     filter_fields = store.filter_fields()
     detail_builder = dashboard.detail(store) if dashboard.detail else None
     metrics, metrics_by_id = dashboard.metrics, dashboard.metrics_by_id
@@ -178,7 +182,8 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             elif field in selected.columns:
                 labels = selected[field].astype(object).where(selected[field].notna(), "Unknown")
                 selected = selected[labels == value]
-            note = f"{store.primary.unit_plural.capitalize()} that missed: {title}" if field == "missed" else f"{title} · {value}"
+            unit_plural = store.primary.unit_plural
+            note = f"{unit_plural[:1].upper()}{unit_plural[1:]} that missed: {title}" if field == "missed" else f"{title} · {value}"
         if search:
             hits = store.search_text.reindex(selected[id_column]).str.contains(search.lower(), regex=False)
             selected = selected[hits.to_numpy()]
