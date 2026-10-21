@@ -53,9 +53,13 @@ class SiteBuild:
     adt: pd.DataFrame
     site_statistics: dict
 
-    def stage(self, table: str, chunk_map: pd.DataFrame, stage_name: str) -> int:
-        """Stage `table` rows for the encounters in `chunk_map` under stage/<stage_name>/<table>."""
-        return stage.stage_table(self.con, self.cfg, table, chunk_map, self.cfg.stage_dir / stage_name / table)
+    def stage(self, table: str, chunk_map: pd.DataFrame, stage_name: str, where: str | None = None) -> int:
+        """Stage `table` rows for the encounters in `chunk_map` under stage/<stage_name>/<table>.
+
+        `where` optionally narrows the rows, as SQL on `source.<column>`.
+        """
+        return stage.stage_table(self.con, self.cfg, table, chunk_map, self.cfg.stage_dir / stage_name / table,
+                                 where=where)
 
     def run_chunks(self, chunk_function: Callable, chunks) -> list:
         """Call chunk_function(cfg, chunk, site_statistics) for every chunk, in worker processes.
@@ -109,6 +113,7 @@ class Metric:
     needs: tuple[str, ...] = ()      # completeness flags this measure depends on
     scale: float = 1000.0            # a rate's events are per this much exposure (per 1,000 patient-days)
     variants: Variants | None = field(default=None, compare=False)
+    missed_label: str = "missed"     # how the list names rows the missed rule picks: "missed", "with any"
     missed: MissedRule = field(default=lambda rows, metric: pd.Series(False, index=rows.index), compare=False)
 
     def missed_rows(self, rows: pd.DataFrame) -> pd.Series:
@@ -122,7 +127,8 @@ class Metric:
         return {"id": self.id, "source": self.source, "kind": self.kind, "numerator": self.numerator,
                 "denominator": self.denominator, "denLabel": self.den_label, "oe": self.expected,
                 "extra": list(self.extra), "parts": [list(p) for p in self.parts], "needs": list(self.needs),
-                "scale": self.scale if self.kind == "rate" else None, "variants": self.variants is not None}
+                "scale": self.scale if self.kind == "rate" else None, "variants": self.variants is not None,
+                "missedLabel": self.missed_label}
 
 
 def resolve_route(route_id: str, metrics: list[Metric], decisions: dict, meta: dict):

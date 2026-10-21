@@ -56,11 +56,13 @@ def read_whole_table(cfg: SiteConfig, table: str) -> pd.DataFrame:
     return clif_conventions(pd.read_parquet(path))
 
 
-def stage_table(con, cfg: SiteConfig, table: str, chunk_map: pd.DataFrame, destination: Path) -> int:
+def stage_table(con, cfg: SiteConfig, table: str, chunk_map: pd.DataFrame, destination: Path,
+                where: str | None = None) -> int:
     """Write the rows of `table` that belong to `chunk_map` encounters, partitioned by chunk.
 
-    `chunk_map` has columns (hospitalization_id, chunk) or (patient_id, chunk).
-    Returns the number of rows staged.
+    `chunk_map` has columns (hospitalization_id, chunk) or (patient_id, chunk). `where` is an
+    optional SQL condition on the source columns (prefix them `source.`) that keeps a dashboard
+    from staging rows it will never read. Returns the number of rows staged.
     """
     source = cfg.table_path(table)
     if not source.exists():
@@ -73,6 +75,7 @@ def stage_table(con, cfg: SiteConfig, table: str, chunk_map: pd.DataFrame, desti
             SELECT source.* EXCLUDE (file_row_number), source.file_row_number AS {SOURCE_ROW}, chunk_map.chunk
             FROM read_parquet('{source}', file_row_number = true) AS source
             JOIN chunk_map ON CAST(source.{key} AS VARCHAR) = chunk_map.{key}
+            {f"WHERE {where}" if where else ""}
         ) TO '{destination}' (FORMAT parquet, PARTITION_BY (chunk), OVERWRITE_OR_IGNORE)
     """)
     staged_rows = con.execute(
