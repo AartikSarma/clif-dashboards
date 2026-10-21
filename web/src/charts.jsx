@@ -54,7 +54,7 @@ export function Sparkline({ points, width = 120, height = 32, domain }) {
 }
 
 /** Monthly run / control chart. points: [{month, value, num, den, n}] */
-export function RunChart({ points, meta, control, target, height = 280, minN = 11, format }) {
+export function RunChart({ points, meta, control, target, height = 280, format }) {
   const [ref, w] = useWidth();
   const [hover, setHover] = useState(null);
   const m = { t: 16, r: 92, b: 34, l: 48 };
@@ -118,7 +118,7 @@ export function RunChart({ points, meta, control, target, height = 280, minN = 1
           <path d={path} fill="none" stroke="var(--series-1)" strokeWidth="2" strokeLinejoin="round" />
           {points.map((p, i) => p.value != null && (
             <circle key={p.month} cx={x(p.month)} cy={y(p.value)} r={out(p, i) ? 6 : 4.5}
-              className={(p.n ?? p.den ?? 0) < minN ? "pt pt-small" : "pt"}
+              className="pt"
               fill={out(p, i) ? "var(--status-critical)" : "var(--series-1)"} />
           ))}
           {hp && <line x1={x(hp.month)} x2={x(hp.month)} y1={0} y2={ih} className="crosshair" />}
@@ -131,7 +131,6 @@ export function RunChart({ points, meta, control, target, height = 280, minN = 1
           {hp.den != null && meta.unit === "%" && <div className="tt-row"><span>Count</span><b>{hp.num} / {hp.den}</b></div>}
           {meta.unit !== "%" && <div className="tt-row"><span>n</span><b>{hp.n}</b></div>}
           {control && control.limits[hover] && <div className="tt-row"><span>Control limits</span><b>{format(control.limits[hover].lo)}–{format(control.limits[hover].hi)}</b></div>}
-          {(hp.n ?? hp.den ?? 0) < minN && <div className="tt-warn">n &lt; {minN}: interpret with caution</div>}
           {out(hp, hover) && <div className="tt-warn">Outside control limits (special-cause signal)</div>}
         </Tooltip>
       )}
@@ -140,7 +139,7 @@ export function RunChart({ points, meta, control, target, height = 280, minN = 1
 }
 
 /** Horizontal bars by stratum. rows: [{key, value, n, num, den}] */
-export function BarBreakdown({ rows, meta, target, format, minN = 11, onPick }) {
+export function BarBreakdown({ rows, meta, target, format, onPick }) {
   const [ref, w] = useWidth();
   const [hover, setHover] = useState(null);
   const rowH = 30;
@@ -162,7 +161,6 @@ export function BarBreakdown({ rows, meta, target, format, minN = 11, onPick }) 
             </g>
           ))}
           {rows.map((r) => {
-            const small = (r.n ?? 0) < minN;
             const bw = r.value != null ? Math.max(2, x(r.value)) : 0;
             const y0 = y(r.key), bh = y.bandwidth();
             return (
@@ -172,10 +170,10 @@ export function BarBreakdown({ rows, meta, target, format, minN = 11, onPick }) 
                 <text x={-10} y={y0 + bh / 2} dy="0.32em" textAnchor="end" className="cat-label">{r.key}</text>
                 {r.value != null && (
                   <path d={`M0,${y0} h${bw - 4} a4,4 0 0 1 4,4 v${bh - 8} a4,4 0 0 1 -4,4 h${-(bw - 4)} z`}
-                    className={small ? "bar bar-small" : "bar"} opacity={hover && hover !== r.key ? 0.55 : 1} />
+                    className="bar" opacity={hover && hover !== r.key ? 0.55 : 1} />
                 )}
                 <text x={bw + 8} y={y0 + bh / 2} dy="0.32em" className="val-label">
-                  {format(r.value)}<tspan className="muted"> · n {r.n}{small ? " ⚠" : ""}</tspan>
+                  {format(r.value)}<tspan className="muted"> · n {r.n}</tspan>
                 </text>
               </g>
             );

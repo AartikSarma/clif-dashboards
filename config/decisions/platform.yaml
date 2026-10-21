@@ -42,13 +42,8 @@ shared:
     alternatives: [UTC]
     source: CLIF convention
 
-  - id: small_cell_n
-    label: Small cells
-    value: 11
-    display: Cells with n < 11 are greyed and flagged "interpret with caution"
-    alternatives: [Hide cells with n < 11 (for external sharing)]
-    source: Common CMS / CLIF federated reporting threshold
-
 changelog:
   - date: 2026-10-19
     change: Site-wide decisions moved here from decisions.yaml so that every dashboard shares them
+  - date: 2026-10-20
+    change: "Removed small_cell_n: groups with n < 11 are no longer greyed or flagged. The cutoff is a privacy convention for sharing outside a site, and these dashboards stay inside it."

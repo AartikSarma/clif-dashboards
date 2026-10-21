@@ -32,7 +32,7 @@ def aggregate(metric: Metric, rows: pd.DataFrame) -> dict:
         counted = rows[exposure > 0]
         exposure_total = float(exposure[exposure > 0].sum())
         events = float(counted[metric.numerator].fillna(0).sum()) if len(counted) else 0.0
-        # n counts the rows that contribute exposure, which is what the small-cell rule is about
+        # n counts the rows that contribute exposure (stays, patients), not units of exposure
         return {"num": _int_if_whole(events), "den": _int_if_whole(exposure_total), "n": int(len(counted)),
                 "value": metric.scale * events / exposure_total if exposure_total else None}
     if metric.kind == "ratio":

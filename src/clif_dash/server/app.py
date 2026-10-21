@@ -101,7 +101,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "strata": [{"id": i, "label": label} for i, label in strata if i in store.primary_rows.columns],
             "completeness": [list(c) for c in completeness_flags],
             "filter_fields": [f.public() for f in filter_fields], "filter_options": store.filter_options(),
-            "n_total": int(len(store.primary_rows)), "small_cell_n": store.small_cell_n,
+            "n_total": int(len(store.primary_rows)),
         })
 
     @router.get("/overview")

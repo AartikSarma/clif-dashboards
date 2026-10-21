@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 
 PLATFORM_DECISIONS = "platform"
+# Decisions the code no longer reads; a site copy written before their removal may still list them
+RETIRED_DECISIONS = {"small_cell_n"}
 # Where the single decisions file lived before it was split into config/decisions/
 SHIPPED_LEGACY_DECISIONS = Path(__file__).resolve().parents[2] / "config" / "decisions.yaml"
 
@@ -69,6 +71,8 @@ def merge_decisions(platform: dict, own: dict, platform_path: Path, own_path: Pa
     platform_values = {d["id"]: d["value"] for d in platform["shared"]}
     own_shared = []
     for decision in own.get("shared", []):
+        if decision["id"] in RETIRED_DECISIONS:
+            continue
         if decision["id"] not in platform_values:
             own_shared.append(decision)
         elif decision["value"] != platform_values[decision["id"]]:

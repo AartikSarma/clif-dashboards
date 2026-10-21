@@ -13,7 +13,6 @@ import "./styles.css";
 let DASH = null; // id of the dashboard on screen
 let META = null; // /api/<dashboard>/meta: decisions, registry, funnels, data quality, filter options
 let D = null;    // the dashboard's decisions (config/decisions/platform.yaml + <dashboard>.yaml)
-let MIN_N = 11;
 let METRICS = [];
 let MBYID = {};
 let PRIMARY = null; // the dashboard's primary row table: { name, id_column, unit, unit_plural }
@@ -29,7 +28,6 @@ function setDashboard(id, meta) {
   DASH = id;
   META = meta;
   D = meta.decisions;
-  MIN_N = meta.small_cell_n;
   METRICS = meta.metrics;
   MBYID = Object.fromEntries(METRICS.map((m) => [m.id, m]));
   PRIMARY = meta.row_tables[0];
@@ -214,7 +212,6 @@ function Overview({ F }) {
                   const meta = D.metrics[m.id];
                   const { agg: a, series } = data.tiles[m.id];
                   const s = status(a.value, meta);
-                  const small = (a.n || 0) < MIN_N;
                   return (
                     <button key={m.id} className="tile" onClick={() => go("metric", m.id)}>
                       <div className="tile-top">
@@ -230,7 +227,6 @@ function Overview({ F }) {
                         <StatusChip s={s} meta={meta} />
                         <Sparkline points={series} domain={meta.unit === "%" ? [0, 100] : null} />
                       </div>
-                      {small && <div className="tile-warn">⚠ n &lt; {MIN_N}: interpret with caution</div>}
                     </button>
                   );
                 })}
@@ -365,10 +361,10 @@ function MetricPage({ id, F }) {
             </div>
             <p className="muted small">
               {control ? `${control.kind}-chart: the shaded bar behind each month is its 3-sigma control limit around the overall ${m.kind === "rate" ? "rate" : "mean"}; red points fall outside it. ` : pooled(m) ? `Control limits are not drawn because ${m.denLabel} are clustered within patients, which would make limits falsely narrow. ` : `Monthly ${m.kind}. `}
-              Hollow points have n &lt; {MIN_N}.
+             
             </p>
             {series.some((p) => p.value != null) ? (
-              <RunChart points={series} meta={meta} control={control} target={meta.target} format={f} minN={MIN_N} />
+              <RunChart points={series} meta={meta} control={control} target={meta.target} format={f} />
             ) : <p className="empty">No data for this measure under the current filters.</p>}
           </section>
 
@@ -386,7 +382,7 @@ function MetricPage({ id, F }) {
                 </div>
               </div>
             </div>
-            {view === "bars" && <BarBreakdown rows={strata} meta={meta} target={meta.target} format={f} minN={MIN_N}
+            {view === "bars" && <BarBreakdown rows={strata} meta={meta} target={meta.target} format={f}
               onPick={(k) => go("patients", `${routeId}|${strat}|${k}`)} />}
             {view === "lines" && (
               <>
@@ -401,14 +397,14 @@ function MetricPage({ id, F }) {
               <table className="dtable num">
                 <thead><tr><th>{stratLabel}</th><th>Value</th>{pooled(m) && <th>Numerator</th>}<th>{pooled(m) ? "Denominator" : "n"}</th>{m.oe && <th>Expected</th>}{m.oe && <th>O/E</th>}</tr></thead>
                 <tbody>{strata.map((r) => (
-                  <tr key={r.key} className={(r.n || 0) < MIN_N ? "row-small" : ""}>
+                  <tr key={r.key}>
                     <td>{r.key}</td><td>{f(r.value)}</td>{pooled(m) && <td>{whole(r.num)}</td>}<td>{pooled(m) ? whole(r.den) : r.n}</td>
                     {m.oe && <td>{f(r.expected)}</td>}{m.oe && <td>{r.oe != null ? r.oe.toFixed(2) : "—"}</td>}
                   </tr>))}
                 </tbody>
               </table>
             )}
-            <p className="muted small">Click a bar to list the {PRIMARY.unit_plural} behind it. Groups with n &lt; {MIN_N} are greyed (⚠).</p>
+            <p className="muted small">Click a bar to list the {PRIMARY.unit_plural} behind it.</p>
           </section>
 
           {m.oe && (
@@ -420,7 +416,7 @@ function MetricPage({ id, F }) {
               <table className="dtable num">
                 <thead><tr><th>Group</th><th>{m.denLabel[0].toUpperCase() + m.denLabel.slice(1)}</th><th>Observed</th><th>Expected</th><th>O/E</th></tr></thead>
                 <tbody>{strata.map((r) => (
-                  <tr key={r.key} className={(r.n || 0) < MIN_N ? "row-small" : ""}>
+                  <tr key={r.key}>
                     <td>{r.key}</td><td>{r.den}</td><td>{r.num} ({f(r.value)})</td><td>{r.expectedCount != null ? r.expectedCount.toFixed(1) : "—"} ({f(r.expected)})</td><td><b>{r.oe != null ? r.oe.toFixed(2) : "—"}</b></td>
                   </tr>))}
                 </tbody>
@@ -464,7 +460,7 @@ function Units({ F }) {
       <div>
         <div className="page-head">
           <h1>ICU comparison</h1>
-          <p className="lede">Each cell is the measure for one ICU under the current filters. Icons show target status; grey cells have fewer than {MIN_N} in the denominator. Click a cell to see its {PRIMARY.unit_plural}.</p>
+          <p className="lede">Each cell is the measure for one ICU under the current filters. Icons show target status. Click a cell to see its {PRIMARY.unit_plural}.</p>
         </div>
         <div className="card scroll-x">
           <table className="heat">
@@ -494,14 +490,13 @@ function Units({ F }) {
 
 function HeatCell({ a, meta, onClick }) {
   const s = status(a.value, meta);
-  const small = (a.n || 0) < MIN_N;
   const icon = { good: "✓", warning: "!", critical: "✕", none: "" }[s];
   return (
-    <td className={`hc hc-${a.value == null ? "na" : small ? "small" : s}`} onClick={onClick} title={statusLabel(s, meta)}>
+    <td className={`hc hc-${a.value == null ? "na" : s}`} onClick={onClick} title={statusLabel(s, meta)}>
       {a.value == null ? <span className="muted">—</span> : (
         <>
           <span className="hc-v">{fmt(a.value, meta)}</span>
-          {icon && !small && <span className="hc-ic" aria-label={statusLabel(s, meta)}>{icon}</span>}
+          {icon && <span className="hc-ic" aria-label={statusLabel(s, meta)}>{icon}</span>}
           <span className="hc-n">n {a.n}</span>
         </>
       )}

@@ -62,3 +62,12 @@ def test_the_old_shipped_file_falls_back_to_the_defaults(tmp_path, capsys):
 def test_any_other_missing_decisions_file_is_an_error(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_config(site_yaml(tmp_path, decisions_file=str(tmp_path / "nowhere.yaml")))
+
+
+def test_a_retired_decision_in_an_old_site_copy_is_dropped(tmp_path):
+    copy = single_file_decisions(tmp_path)
+    old = yaml.safe_load(copy.read_text())
+    old["shared"].append({"id": "small_cell_n", "label": "Small cells", "value": 11, "display": "greyed"})
+    copy.write_text(yaml.safe_dump(old, allow_unicode=True))
+    cfg = load_config(site_yaml(tmp_path, decisions_file=str(copy))).bind("respiratory")
+    assert "small_cell_n" not in [d["id"] for d in cfg.decisions()["shared"]]

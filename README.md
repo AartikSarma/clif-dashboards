@@ -37,7 +37,7 @@ Every analytic choice lives in `config/decisions/`: thresholds, windows, ventila
 
 ## Keep it inside your institution
 
-The built tables in `output_dir` and every page the server returns contain hospitalization IDs and dates. The server listens only on the machine it runs on and has no login; do not expose it on a network until authentication is added. Groups smaller than 11 are greyed and flagged on every page; do not share those cells outside the QI team.
+The built tables in `output_dir` and every page the server returns contain hospitalization IDs and dates. The server listens only on the machine it runs on and has no login; do not expose it on a network until authentication is added. The dashboards are for a site's own QI team; nothing they show is meant to leave the site.
 
 ## How it works
 

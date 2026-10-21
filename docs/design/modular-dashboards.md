@@ -35,7 +35,7 @@ The top-level `clif_dash` package is the platform; modules live under `clif_dash
 config/
   site_template.yaml   site config: paths, dashboards list, decisions folder
   decisions/
-    platform.yaml      site-wide decisions: age_min, stitch_hours, outliers, time_zone, small_cell_n
+    platform.yaml      site-wide decisions: age_min, stitch_hours, outliers, time_zone
     respiratory.yaml   the respiratory dashboard's decisions
     icu_stays.yaml     the platform-test dashboard's decisions
 src/clif_dash/
@@ -125,7 +125,7 @@ One `build` invocation stitches encounters once and builds every dashboard in th
 - Done: a `rate` kind, scale × Σevents / Σexposure (per 1,000 patient-days or device-days), with u-chart limits; a rate's n counts the rows contributing exposure. Control limits now follow the kind: p-chart for a ratio, u-chart for a rate. `icu_stays` carries a test rate, deaths per 1,000 ICU days.
 - Done: dashboard-declared filters. The platform offers hospital, ICU, age band, sex and race/ethnicity; respiratory adds code status and the tracheostomy flag as `FilterField`s, either a multi-select over a column's values or a yes/no flag.
 - Done: variants and sorting from the measure. A measure declares `Variants` (the decision holding the default, the summary key listing built values, the numerator column per value), and `resolve_route` reads `<measure>@<value>` for any measure; missed rules receive the resolved measure; the list sorts by any pooled measure's per-row share. `DERIVED_SORT`, the dashboards' resolvers and the `ltvv_*` response keys are gone.
-- Dropped: small-cell suppression on the server. The dashboards are for internal use only, by a site's own QI team, who already see patient-level rows; no PHI leaves a site (decided 2026-10-20). Small groups stay greyed and flagged, as now. If the consortium later pools results across sites, suppression belongs in that export step (an aggregate-only file with small cells removed and totals protected from back-calculation), not in the internal server.
+- Dropped: small-cell suppression on the server. The dashboards are for internal use only, by a site's own QI team, who already see patient-level rows; no PHI leaves a site (decided 2026-10-20). Small groups are no longer greyed or flagged either: the n < 11 cutoff is a privacy convention, not a statistical one, and was removed. If the consortium later pools results across sites, suppression belongs in that export step (an aggregate-only file with small cells removed and totals protected from back-calculation), not in the internal server.
 
 None of these moved a respiratory number; the oracle tests still pass unchanged. The server also refuses to start on a build older than its dashboard's measures, which would otherwise show a blank page.
 

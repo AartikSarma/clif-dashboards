@@ -99,7 +99,6 @@ class Store:
         self.search_text = pd.Series(
             [" ".join("" if v is None else str(v) for v in r.values()).lower() for r in records],
             index=primary_display[self.primary.id_column].to_numpy())
-        self.small_cell_n = next((d["value"] for d in self.decisions["shared"] if d["id"] == "small_cell_n"), 11)
 
     @property
     def primary_rows(self) -> pd.DataFrame:
