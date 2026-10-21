@@ -1,14 +1,14 @@
 # CLIF ICU Quality Dashboards
 
-Quality measures for adults on invasive mechanical ventilation, computed from a CLIF 2.1 database and served as an interactive dashboard. It is built for large sites: UCSF has more than 80,000 ICU admissions.
+ICU quality dashboards computed from a CLIF 2.1 database and served inside the site: respiratory failure on invasive mechanical ventilation, and antimicrobial stewardship (NHSN-style days of therapy per 1,000 days present). It is built for large sites: UCSF has more than 80,000 ICU admissions.
 
-The measures, definitions and interface come from Cathy Gao-Howard's [ICU Respiratory Failure Quality Dashboard](https://github.com/cag-lab/clif-icu-quality-dashboard) (commit `b3cdf29`). That project writes one self-contained HTML file, which works for a small dataset but not for a large one: on 10,000 synthetic hospitalizations it needs 15 GB of memory and writes a 30 MB page. This repository keeps her metric logic unchanged and changes how data reach it. A batch build computes the measures in chunks, and a local server answers each page's request from the results. On the same synthetic data the build takes 80 seconds and stays under 3 GB of memory, and its output matches the original's row for row.
+The respiratory measures, definitions and interface come from Cathy Gao-Howard's [ICU Respiratory Failure Quality Dashboard](https://github.com/cag-lab/clif-icu-quality-dashboard) (commit `b3cdf29`). That project writes one self-contained HTML file, which works for a small dataset but not for a large one: on 10,000 synthetic hospitalizations it needs 15 GB of memory and writes a 30 MB page. This repository keeps her metric logic unchanged and changes how data reach it. A batch build computes the measures in chunks, and a local server answers each page's request from the results. On the same synthetic data the build takes 80 seconds and stays under 3 GB of memory, and its output matches the original's row for row.
 
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/), which installs Python 3.12 and every Python dependency
 - [Node.js](https://nodejs.org/) 18 or later, to build the web interface
-- CLIF 2.1 tables as parquet files named `clif_<table>.parquet`. Required: `patient`, `hospitalization`, `adt`, `respiratory_support`. Optional: `vitals`, `labs`, `position`, `patient_assessments`, `medication_admin_continuous`, `code_status`, `hospital_diagnosis`. A measure that needs a missing table shows as unavailable.
+- CLIF 2.1 tables as parquet files named `clif_<table>.parquet`. Every dashboard needs `patient`, `hospitalization` and `adt`. Respiratory also needs `respiratory_support` and uses `vitals`, `labs`, `position`, `patient_assessments`, `medication_admin_continuous`, `code_status` and `hospital_diagnosis` when present; a measure that needs a missing table shows as unavailable. Stewardship needs `medication_admin_intermittent`.
 
 ## Run it on your site
 
@@ -51,6 +51,7 @@ The server keeps the episode table in memory and computes each page's numbers un
 | `src/clif_dash/build.py`, `stage.py` | Build platform: encounter stitching, chunked staging, summary |
 | `src/clif_dash/dashboard.py` | The contract between the platform and a dashboard module |
 | `src/clif_dash/dashboards/respiratory/` | The respiratory dashboard: its build phases, measures and timelines |
+| `src/clif_dash/dashboards/stewardship/` | The stewardship dashboard: days present and days of therapy by ICU |
 | `src/clif_dash/upstream/` | The original metric logic, changed only where marked `clif_dashboards:` |
 | `src/clif_dash/server/` | API: filters, aggregation, routes |
 | `web/` | React interface, adapted from the original to fetch from the API |

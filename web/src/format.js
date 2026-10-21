@@ -1,11 +1,12 @@
 // Display helpers. Aggregation runs on the server (src/clif_dash/server/aggregate.py);
 // these only format values and compare them with the targets in decisions.yaml.
 
-export function fmt(v, meta, digits) {
+/** A value with its unit. `compact` uses the measure's unit_short, if it has one, where space is tight. */
+export function fmt(v, meta, digits, compact = false) {
   if (v == null || Number.isNaN(v)) return "—";
   if (meta.unit === "%") return `${v.toFixed(digits ?? (v < 10 ? 1 : 0))}%`;
   const d = digits ?? (Math.abs(v) < 10 ? 1 : 0);
-  return `${v.toFixed(d)} ${meta.unit}`;
+  return `${v.toFixed(d)} ${compact && meta.unit_short ? meta.unit_short : meta.unit}`;
 }
 
 /** Target status: good | warning | critical | none */

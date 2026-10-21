@@ -1,0 +1,295 @@
+# =============================================================================
+# Antimicrobial stewardship dashboard: decision log
+# =============================================================================
+# Every analytic choice the stewardship dashboard makes is read from this file
+# and from platform.yaml, whose site-wide choices come first under `shared:`.
+# Change a `value`, rebuild (`uv run clif-dash build`), and both the numbers
+# and each measure's "How this is calculated" panel update.
+#
+# The measures follow the NHSN Antimicrobial Use (AU) Option: days of therapy
+# per 1,000 days present, by ICU, with agents grouped as in the NHSN SAAR
+# guide (2017/2018 baseline). They are not SAARs: there are no NHSN predicted
+# values here, so they support comparison within the site, over time and
+# between ICUs, not against national benchmarks.
+#
+# Agents are CLIF medication_admin_intermittent med_category values, compared
+# case-insensitively. Each decision has an id, label, value, display,
+# alternatives and source. Record why you changed a default under `changelog`.
+# =============================================================================
+
+version: 1
+
+shared:
+  - id: icu_locations
+    label: Locations
+    value: icu
+    display: ADT rows with location_category icu; the unit is the location_type (e.g. Medical ICU), as on the respiratory dashboard
+    alternatives: [All inpatient locations]
+    source: Dashboard scope (ICU quality)
+
+  - id: days_present
+    label: Days present
+    value: calendar_days_touched
+    display: Each local calendar day on which the patient spent any time in the unit counts as one day present; a stay that ends exactly at midnight does not count the next day. A patient in two ICUs on one day is present in both, and the all-ICU figure adds the units' counts, as NHSN location-level reporting does
+    alternatives: [Midnight census]
+    source: NHSN AU Option (days present)
+
+  - id: missing_icu_end
+    label: Open ICU stays
+    value: encounter_discharge
+    display: An ICU ADT row with no out time ends at the encounter's discharge; if that is missing too, the row is left out and counted on the data-quality page
+    alternatives: [Leave out every open row]
+    source: Local choice
+
+  - id: antimicrobial_day
+    label: Antimicrobial day
+    value: agent_day_location
+    display: One day of therapy per agent per calendar day per unit where it was given, whatever the number of doses. Two agents on one day are two days of therapy
+    alternatives: [Length of therapy (days with any agent)]
+    source: NHSN AU Option
+
+  - id: administered_actions
+    label: Doses counted
+    value: [administered]
+    display: MAR actions in the administered group (given and bolus); not-given and unmapped actions are left out
+    alternatives: []
+    source: CLIF mar_action_group
+
+  - id: routes
+    label: Routes
+    value: [iv, im, enteral]
+    display: Intravenous, intramuscular (CLIF's im category also holds subcutaneous) and enteral. NHSN also counts the respiratory route, which CLIF has no category for, so inhaled agents are missing
+    alternatives: [Add buccal/sublingual]
+    source: NHSN AU Option (IV, IM, digestive, respiratory)
+
+  - id: location_attribution
+    label: Where a dose counts
+    value: location_at_administration
+    display: The ICU whose ADT row contains the administration time (in ≤ time < out); doses given outside an ICU are not counted
+    alternatives: [Unit where the order was written]
+    source: NHSN AU Option
+
+  - id: control_limits
+    label: Control limits
+    value: none
+    display: Not drawn. Days of therapy cluster within patients (one course spans many days), so u-chart limits would be falsely narrow
+    alternatives: [u-chart on days present]
+    source: Local choice
+
+metrics:
+  all_antibacterial:
+    number: S1
+    domain: Overall use
+    title: All antibacterial days of therapy per 1,000 days present
+    short: All antibacterials
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Antibacterial days of therapy given in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [amikacin, amoxicillin, amoxicillin_clavulanate, ampicillin, ampicillin_sulbactam, azithromycin,
+                aztreonam, cefaclor, cefadroxil, cefamandole, cefazolin, cefdinir, cefepime, cefiderocol, cefixime,
+                cefmetazole, cefonicid, cefoperazone, cefotaxime, cefotetan, cefoxitin, cefpodoxime, cefprozil,
+                ceftaroline, ceftazidime, ceftazidime_avibactam, ceftazidime_clavulanate, ceftibuten, ceftizoxime,
+                ceftolozane_tazobactam, ceftriaxone, cefuroxime, cephalexin, cephalothin, cephapirin, cephradine,
+                chloramphenicol, cinoxacin, ciprofloxacin, clarithromycin, clindamycin, cloxacillin, colistin,
+                dalbavancin, daptomycin, delafloxacin, dicloxacillin, doripenem, doxycycline, eravacycline,
+                ertapenem, erythromycin, fidaxomicin, fosfomycin, gatifloxacin, gentamicin, imipenem,
+                imipenem_relebactam, kanamycin, lefamulin, levofloxacin, lincomycin, linezolid, meropenem,
+                meropenem_vaborbactam, methicillin, metronidazole, mezlocillin, minocycline, moxifloxacin,
+                nafcillin, nitrofurantoin, norfloxacin, ofloxacin, omadacycline, oritavancin, oxacillin,
+                penicillin, piperacillin_tazobactam, pivampicillin, plazomicin, polymyxin_b,
+                quinupristin_dalfopristin, rifampin, streptomycin, sulbactam_durlobactam, sulfadiazine,
+                sulfadiazine_trimethoprim, sulfisoxazole, tedizolid, telavancin, telithromycin, tetracycline,
+                ticarcillin, ticarcillin_clavulanate, tigecycline, tobramycin, trimethoprim,
+                trimethoprim_sulfamethoxazole, vancomycin]
+        display: Every antibacterial category in CLIF, by any counted route (oral vancomycin and fidaxomicin included). Unlike the SAAR's all-antibacterial group, newer agents that its model leaves out (cefiderocol, colistin and others) are counted, because no model is fitted here. Antivirals and antifungals are not antibacterials, although CLIF groups them with the CMS sepsis antibiotics
+        alternatives: [The SAAR all-antibacterial group]
+        source: NHSN AU Option; CLIF mCIDE medication_admin_intermittent categories
+      - id: iv_only
+        label: IV-only agents
+        value: []
+        display: None
+        alternatives: []
+        source: NHSN AU Option
+
+  antibacterial_days_share:
+    number: S2
+    domain: Overall use
+    title: Days present with any antibacterial
+    short: Days on antibacterials
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Days present on which the patient received at least one antibacterial in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: same as S1
+        display: The S1 agents. Unlike days of therapy, a day with two agents counts once, so this is a length-of-therapy view
+        alternatives: []
+        source: NHSN AU Option (length of therapy, by analogy)
+
+  broad_hospital_onset:
+    number: S3
+    domain: Agent groups (NHSN)
+    title: Broad-spectrum agents for hospital-onset infections
+    short: Broad spectrum, hospital-onset
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Days of therapy with these agents in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [amikacin, aztreonam, cefepime, ceftazidime, doripenem, gentamicin, imipenem, meropenem,
+                piperacillin_tazobactam, tobramycin]
+        display: Amikacin, aztreonam, cefepime, ceftazidime, doripenem, gentamicin, imipenem/cilastatin, meropenem, piperacillin/tazobactam, tobramycin
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+      - id: iv_only
+        label: IV-only agents
+        value: [amikacin, aztreonam, gentamicin, tobramycin]
+        display: Amikacin, aztreonam, gentamicin and tobramycin count only when given intravenously
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+
+  broad_community:
+    number: S4
+    domain: Agent groups (NHSN)
+    title: Broad-spectrum agents for community-acquired infections
+    short: Broad spectrum, community
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Days of therapy with these agents in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [cefaclor, cefdinir, cefixime, cefotaxime, cefpodoxime, cefprozil, ceftriaxone, cefuroxime,
+                ciprofloxacin, ertapenem, levofloxacin, moxifloxacin]
+        display: Cefaclor, cefdinir, cefixime, cefotaxime, cefpodoxime, cefprozil, ceftriaxone, cefuroxime, ciprofloxacin, ertapenem, levofloxacin, moxifloxacin. NHSN also lists gemifloxacin, which has no CLIF category
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+      - id: iv_only
+        label: IV-only agents
+        value: []
+        display: None
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+
+  resistant_gram_positive:
+    number: S5
+    domain: Agent groups (NHSN)
+    title: Agents for resistant gram-positive infections (e.g., MRSA)
+    short: Anti-MRSA agents
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Days of therapy with these agents in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [ceftaroline, dalbavancin, daptomycin, linezolid, oritavancin, quinupristin_dalfopristin, tedizolid,
+                telavancin, vancomycin]
+        display: Ceftaroline, dalbavancin, daptomycin, linezolid, oritavancin, quinupristin/dalfopristin, tedizolid, telavancin, vancomycin
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+      - id: iv_only
+        label: IV-only agents
+        value: [vancomycin]
+        display: Vancomycin counts only when given intravenously; oral vancomycin treats C. difficile
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+
+  narrow_beta_lactam:
+    number: S6
+    domain: Agent groups (NHSN)
+    title: Narrow-spectrum beta-lactam agents
+    short: Narrow-spectrum beta-lactams
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: neutral
+    target: null
+    numerator: Days of therapy with these agents in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [amoxicillin, amoxicillin_clavulanate, ampicillin, ampicillin_sulbactam, cefadroxil, cefazolin,
+                cefotetan, cefoxitin, cephalexin, dicloxacillin, nafcillin, oxacillin, penicillin]
+        display: Amoxicillin, amoxicillin/clavulanate, ampicillin, ampicillin/sulbactam, cefadroxil, cefazolin, cefotetan, cefoxitin, cephalexin, dicloxacillin, nafcillin, oxacillin, penicillin (CLIF's one category covers NHSN's penicillin G and V)
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+      - id: iv_only
+        label: IV-only agents
+        value: []
+        display: None
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+
+  cdi_risk:
+    number: S7
+    domain: Agent groups (NHSN)
+    title: Antibacterials posing the highest risk for C. difficile infection
+    short: Highest C. difficile risk
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Days of therapy with these agents in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [cefdinir, cefepime, cefixime, cefotaxime, cefpodoxime, ceftazidime, ceftriaxone, ciprofloxacin,
+                clindamycin, levofloxacin, moxifloxacin]
+        display: Cefdinir, cefepime, cefixime, cefotaxime, cefpodoxime, ceftazidime, ceftriaxone, ciprofloxacin, clindamycin, levofloxacin, moxifloxacin. These agents also belong to other groups. NHSN also lists gemifloxacin, which has no CLIF category
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+      - id: iv_only
+        label: IV-only agents
+        value: []
+        display: None
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+
+  antifungal_candidiasis:
+    number: S8
+    domain: Agent groups (NHSN)
+    title: Antifungals predominantly used for invasive candidiasis
+    short: Antifungals (candidiasis)
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Days of therapy with these agents in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [anidulafungin, caspofungin, fluconazole, micafungin]
+        display: Anidulafungin, caspofungin, fluconazole, micafungin. CLIF's combined category micafungin_posaconazole_voriconazole is left out, because it cannot be split by agent
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+      - id: iv_only
+        label: IV-only agents
+        value: []
+        display: None
+        alternatives: []
+        source: NHSN SAAR Guide, 2017/2018 baseline (adult)
+
+changelog:
+  - date: 2026-10-20
+    change: Initial definitions from the NHSN AU Option and the SAAR guide (2017/2018 baseline, adult groups)

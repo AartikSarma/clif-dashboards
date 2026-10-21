@@ -218,7 +218,7 @@ function Overview({ F }) {
                         <span className="tile-num">{meta.number}</span>
                         <span className="tile-title">{meta.short}</span>
                       </div>
-                      <div className="tile-val">{fmt(a.value, meta)}</div>
+                      <div className="tile-val">{fmt(a.value, meta, undefined, true)}</div>
                       <div className="tile-sub">
                         {pooled(m) ? `${whole(a.num)} / ${whole(a.den)} ${m.denLabel}` : `n ${a.n} ${m.denLabel}`}
                         {a.oe != null && <span> · O/E {a.oe.toFixed(2)}</span>}
@@ -441,7 +441,7 @@ function MetricPage({ id, F }) {
                 </table>
               ) : <p className="muted small">This measure depends on no optional input.</p>}
               <p className="small">Provenance: {META.meta.clifpy}; pipeline {META.meta.pipeline_version}; data folder <code>{META.meta.data_folder}</code>, built {META.meta.generated_at}.</p>
-              <button className="link" onClick={() => go("patients", `${routeId}|missed|1`)}>List {PRIMARY.unit_plural} that missed this measure →</button>
+              <button className="link" onClick={() => go("patients", `${routeId}|missed|1`)}>List {PRIMARY.unit_plural} {m.missedLabel === "missed" ? "that missed this measure" : `${m.missedLabel} use`} →</button>
             </section>
           </div>
         </div>
@@ -495,7 +495,7 @@ function HeatCell({ a, meta, onClick }) {
     <td className={`hc hc-${a.value == null ? "na" : s}`} onClick={onClick} title={statusLabel(s, meta)}>
       {a.value == null ? <span className="muted">—</span> : (
         <>
-          <span className="hc-v">{fmt(a.value, meta)}</span>
+          <span className="hc-v">{fmt(a.value, meta, undefined, true)}</span>
           {icon && <span className="hc-ic" aria-label={statusLabel(s, meta)}>{icon}</span>}
           <span className="hc-n">n {a.n}</span>
         </>
@@ -533,7 +533,18 @@ const GENERIC_LIST = {
   columns: (thr, rows) => Object.keys(rows[0] || {}).map((c) => [c, c.replace(/_/g, " ")]),
   cell: (e, c) => (typeof e[c] === "number" && !Number.isInteger(e[c]) ? e[c].toFixed(2) : e[c] ?? "—"),
 };
-const LISTS = { respiratory: RESPIRATORY_LIST };
+// Stewardship: each row is one encounter's days in one ICU in one month, with days of therapy by agent group
+const STEWARDSHIP_LIST = {
+  columns: () => [
+    ["label_id", "Hospitalization"], ["month", "Month"], ["unit", "ICU"], ["first_day", "First day"], ["last_day", "Last day"],
+    ["days_present", "Days present"], ["days_any", "Days on antibacterials"], ["dot_all_antibacterial", "Antibacterial DOT"],
+    ["dot_broad_hospital_onset", "Broad, hospital-onset"], ["dot_broad_community", "Broad, community"],
+    ["dot_resistant_gram_positive", "Anti-MRSA"], ["dot_narrow_beta_lactam", "Narrow beta-lactam"],
+    ["dot_cdi_risk", "C. difficile risk"], ["dot_antifungal_candidiasis", "Antifungal"],
+  ],
+  cell: (e, c) => e[c] ?? "—",
+};
+const LISTS = { respiratory: RESPIRATORY_LIST, stewardship: STEWARDSHIP_LIST };
 
 function Patients({ F, arg }) {
   const [q, setQ] = useState("");
@@ -560,9 +571,9 @@ function Patients({ F, arg }) {
         <div className="card-head">
           <div className="seg">
             <input type="search" placeholder="Search ID, ICU, discharge…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select value={missedValue} onChange={(e) => go("patients", e.target.value || null)} aria-label={`Show ${PRIMARY.unit_plural} that missed a measure`}>
+            <select value={missedValue} onChange={(e) => go("patients", e.target.value || null)} aria-label={`Show ${PRIMARY.unit_plural} picked out by a measure`}>
               <option value="">All {PRIMARY.unit_plural}</option>
-              {METRICS.map((x) => <option key={x.id} value={`${x.id}|missed|1`}>Missed: {D.metrics[x.id].short}</option>)}
+              {METRICS.map((x) => <option key={x.id} value={`${x.id}|missed|1`}>{cap(x.missedLabel)}: {D.metrics[x.id].short}</option>)}
             </select>
           </div>
           <a className="btn" href={`${api("/rows.csv")}${query(F, params)}`}>Download CSV</a>
@@ -756,6 +767,9 @@ function Quality({ F }) {
       if ((dq.semi_prone_names || []).length) notes.push(`Position names mapped to prone that contain "semi": ${dq.semi_prone_names.join(", ")}. Review the mCIDE mapping.`);
       if (dq.respiratory_rows_without_time) notes.push(`${dq.respiratory_rows_without_time.toLocaleString()} respiratory_support rows have no recorded_dttm and were left out of the ventilator timeline.`);
       if (dq.icu_rows_without_location_type) notes.push(`${dq.icu_rows_without_location_type} ICU ADT rows have no location_type: they appear as "ICU (type not mapped)".`);
+      if (dq.icu_rows_without_end) notes.push(`${dq.icu_rows_without_end.toLocaleString()} ICU ADT rows have no out time and no discharge time, so they add no days present.`);
+      if (dq.antimicrobial_rows_without_time) notes.push(`${dq.antimicrobial_rows_without_time.toLocaleString()} antimicrobial administrations have no admin_dttm and are not counted.`);
+      if (dq.unmapped_mar_action_rows) notes.push(`${dq.unmapped_mar_action_rows.toLocaleString()} intermittent medication rows have an unmapped MAR action (mar_action_group "other") and are not counted as doses.`);
       if (data.n_rows && data.n_with_height != null && data.n_with_height / data.n_rows < 0.9) notes.push(`Height is missing for ${data.n_rows - data.n_with_height} of ${data.n_rows} episodes, so their ventilator hours drop out of the LTVV denominator.`);
       return (
         <div>
@@ -784,6 +798,18 @@ function Quality({ F }) {
             </table>
           </section>}
           <div className="two-col">
+            {dq.antimicrobial_administrations && (
+              <section className="card">
+                <h2>Antimicrobial administrations</h2>
+                <table className="dtable num"><tbody>
+                  <tr><td>Staged (counted agents, adult encounters with ICU time)</td><td>{dq.antimicrobial_administrations.staged.toLocaleString()}</td></tr>
+                  <tr><td>Administered, with a time</td><td>{dq.antimicrobial_administrations.administered.toLocaleString()}</td></tr>
+                  <tr><td>By a counted route</td><td>{dq.antimicrobial_administrations.counted_route.toLocaleString()}</td></tr>
+                  <tr><td>Given in an ICU</td><td>{dq.antimicrobial_administrations.in_icu.toLocaleString()}</td></tr>
+                </tbody></table>
+                <p className="muted small">Rows by route, all counted agents: {Object.entries(dq.antimicrobial_rows_by_route || {}).map(([k, v]) => `${k} ${v.toLocaleString()}`).join(", ") || "none"}.</p>
+              </section>
+            )}
             <section className="card">
               <h2>Tables loaded</h2>
               <table className="dtable num"><tbody>{Object.entries(dq.row_counts).map(([k, v]) => <tr key={k}><td><code>{k}</code></td><td>{v.toLocaleString()} rows</td>{dq.outliers && <td className="muted">{(dq.outliers[k] ?? Object.entries(dq.outliers).filter(([kk]) => kk.startsWith(k + ".")).reduce((s, [, n]) => s + n, 0)) || 0} outliers set to missing</td>}</tr>)}</tbody></table>

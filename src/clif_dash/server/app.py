@@ -183,7 +183,8 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
                 labels = selected[field].astype(object).where(selected[field].notna(), "Unknown")
                 selected = selected[labels == value]
             unit_plural = store.primary.unit_plural
-            note = f"{unit_plural[:1].upper()}{unit_plural[1:]} that missed: {title}" if field == "missed" else f"{title} · {value}"
+            note = (f"{unit_plural[:1].upper()}{unit_plural[1:]} {metric.missed_label}: {title}" if field == "missed"
+                    else f"{title} · {value}")
         if search:
             hits = store.search_text.reindex(selected[id_column]).str.contains(search.lower(), regex=False)
             selected = selected[hits.to_numpy()]
