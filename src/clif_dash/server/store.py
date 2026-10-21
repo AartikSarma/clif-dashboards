@@ -92,6 +92,9 @@ class Store:
             rows = pd.read_parquet(output / f"{table.name}.parquet")
             if rows.empty:
                 rows = pd.DataFrame(columns=[table.id_column, "month"])
+            if table is row_tables[0] and not rows[table.id_column].is_unique:
+                raise ValueError(f"{output / table.name}.parquet: {table.id_column} is not unique, so the list, "
+                                 "search and detail pages cannot tell rows apart")
             self.tables[table.name] = rows
             self.displays[table.name] = display_rows(rows, cfg.site_timezone).set_index(table.id_column, drop=False)
         primary_display = self.displays[self.primary.name]

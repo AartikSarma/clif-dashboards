@@ -101,6 +101,7 @@ def site_statistics(con, cfg: SiteConfig) -> dict:
 
 def data_quality(con, cfg: SiteConfig) -> dict:
     source = f"read_parquet('{cfg.table_path('medication_admin_intermittent')}')"
+    columns = set(stage.source_columns(cfg, "medication_admin_intermittent"))
     groups = group_agents(cfg.decisions())
     counted = sorted(set().union(*(agents for agents, _ in groups.values())))
     agent_list = ", ".join(f"'{a}'" for a in counted)
@@ -114,14 +115,16 @@ def data_quality(con, cfg: SiteConfig) -> dict:
     uncounted = con.execute(
         f"SELECT lower(CAST(med_category AS VARCHAR)), count(*) FROM {source} "
         "WHERE lower(CAST(med_group AS VARCHAR)) = 'cms_sepsis_qualifying_antibiotics' "
-        f"AND lower(CAST(med_category AS VARCHAR)) NOT IN ({agent_list}) GROUP BY 1 ORDER BY 2 DESC").fetchall()
+        f"AND lower(CAST(med_category AS VARCHAR)) NOT IN ({agent_list}) GROUP BY 1 ORDER BY 2 DESC").fetchall() \
+        if "med_group" in columns else []
     return {
         "antimicrobial_rows_without_time": scalar(
             f"SELECT count(*) FROM {source} WHERE admin_dttm IS NULL "
             f"AND lower(CAST(med_category AS VARCHAR)) IN ({agent_list})"),
         "antimicrobial_rows_by_route": {str(route): int(n) for route, n in routes},
         "unmapped_mar_action_rows": scalar(
-            f"SELECT count(*) FROM {source} WHERE lower(CAST(mar_action_group AS VARCHAR)) = 'other'"),
+            f"SELECT count(*) FROM {source} WHERE lower(CAST(mar_action_group AS VARCHAR)) = 'other'")
+        if "mar_action_group" in columns else 0,
         "sepsis_antibiotic_categories_not_counted": {str(category): int(n) for category, n in uncounted},
     }
 
@@ -215,7 +218,8 @@ def build(site: SiteBuild) -> BuildResult:
     rows["race_eth"] = [prep.race_eth(encounter_index.at[b, "race_category"],
                                       encounter_index.at[b, "ethnicity_category"]) for b in blocks]
     rows["age_band"] = blocks.map(encounter_index["age"]).map(prep.age_band)
-    rows["row_id"] = rows["label_id"] + " · " + rows["unit"] + " · " + rows["month"]
+    # The same ICU type at two hospitals in one month is two rows, so the hospital belongs in the id
+    rows["row_id"] = rows["label_id"] + " · " + rows["hospital"] + " · " + rows["unit"] + " · " + rows["month"]
     for column in ("first_day", "last_day"):
         rows[column] = rows[column].dt.strftime("%Y-%m-%d")
     rows = rows[["row_id", "encounter_block", "label_id", "month", "hospital", "unit", "sex", "race_eth", "age_band",
