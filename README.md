@@ -17,6 +17,7 @@ The measures, definitions and interface come from Cathy Gao-Howard's [ICU Respir
    uv sync
    cd web && npm install && npm run build && cd ..
    ```
+   If you previously synced with `polars>=2`, run `uv sync --upgrade-package polars` once to apply the compatible pin used by `clifpy`.
 2. Copy `config/site_template.yaml` to `config/<site>.yaml` and set `clif_dir`, `site_name`, `site_timezone` and `output_dir`. The time zone matters: CLIF stores UTC, and the dashboard groups days and months in local time. Site configs stay out of git.
 3. Build the measures:
    ```bash

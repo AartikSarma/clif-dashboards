@@ -113,14 +113,26 @@ def create_app(cfg: SiteConfig) -> FastAPI:
 
     @app.get("/api/units")
     def units(request: Request):
+        return comparison_table(request, "unit")
+
+    @app.get("/api/hospitals")
+    def hospitals(request: Request):
+        return comparison_table(request, "hospital")
+
+    def comparison_table(request: Request, column: str):
         episodes, proning = filtered(request)
-        unit_names = sorted(episodes["unit"].dropna().unique().tolist())
+        names = sorted(episodes[column].dropna().unique().tolist())
         table = []
         for metric in METRICS:
             rows = rows_for(metric, episodes, proning)
-            cells = {g["key"]: g for g in agg.by_group(metric, rows, "unit", keys=unit_names)}
+            cells = {g["key"]: g for g in agg.by_group(metric, rows, column, keys=names)}
             table.append({"id": metric.id, "all": agg.aggregate(metric, rows), "cells": cells})
-        return jsonable({"units": unit_names, "rows": table})
+        payload = {"groups": names, "rows": table}
+        if column == "unit":
+            payload["units"] = names
+        elif column == "hospital":
+            payload["hospitals"] = names
+        return jsonable(payload)
 
     def episode_selection(request: Request, metric_arg: str | None, field: str | None, value: str | None,
                           search: str | None, sort: str, direction: int):

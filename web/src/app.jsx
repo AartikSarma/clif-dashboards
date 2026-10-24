@@ -196,7 +196,7 @@ function Overview({ F }) {
                       <div className="tile-val">{fmt(a.value, meta)}</div>
                       <div className="tile-sub">
                         {m.kind === "ratio" ? `${a.num ?? 0} / ${a.den ?? 0} ${m.denLabel}` : `n ${a.n} ${m.denLabel}`}
-                        {a.oe != null && <span> · O/E {a.oe.toFixed(2)}</span>}
+                        {m.source !== "proning" && a.oe != null && <span> · O/E {a.oe.toFixed(2)}</span>}
                       </div>
                       <div className="tile-foot">
                         <StatusChip s={s} meta={meta} />
@@ -275,6 +275,7 @@ function MetricPage({ id, F }) {
       const control = data.control;
       const strata = data.strata;
       const routeId = data.route_id;
+      const showOe = m.source !== "proning";
       const f = (v) => fmt(v, meta);
       const s = status(agg.value, meta);
       const ix = METRICS.findIndex((x) => x.id === m.id);
@@ -303,7 +304,7 @@ function MetricPage({ id, F }) {
                   {m.kind === "ratio" ? `${agg.num} of ${agg.den} ${m.denLabel}` : `${m.kind} of ${agg.n} ${m.denLabel}${agg.q1 != null ? ` · IQR ${f(agg.q1)}–${f(agg.q3)}` : ""}`}
                 </span>
               </div>
-              {agg.oe != null && (
+              {showOe && agg.oe != null && (
                 <div className="oe-line">
                   Observed {f(agg.value)} vs expected {f(agg.expected)} · <b>O/E {agg.oe.toFixed(2)}</b>
                   <span className="muted"> ({m.id === "mortality" ? "site-fitted model; compares groups with this site's average" : "CLIF consortium global coefficients"})</span>
@@ -371,11 +372,11 @@ function MetricPage({ id, F }) {
             )}
             {view === "table" && (
               <table className="dtable num">
-                <thead><tr><th>{stratLabel}</th><th>Value</th>{m.kind === "ratio" && <th>Numerator</th>}<th>{m.kind === "ratio" ? "Denominator" : "n"}</th>{m.oe && <th>Expected</th>}{m.oe && <th>O/E</th>}</tr></thead>
+                <thead><tr><th>{stratLabel}</th><th>Value</th>{m.kind === "ratio" && <th>Numerator</th>}<th>{m.kind === "ratio" ? "Denominator" : "n"}</th>{showOe && m.oe && <th>Expected</th>}{showOe && m.oe && <th>O/E</th>}</tr></thead>
                 <tbody>{strata.map((r) => (
                   <tr key={r.key} className={(r.n || 0) < MIN_N ? "row-small" : ""}>
                     <td>{r.key}</td><td>{f(r.value)}</td>{m.kind === "ratio" && <td>{r.num}</td>}<td>{m.kind === "ratio" ? r.den : r.n}</td>
-                    {m.oe && <td>{f(r.expected)}</td>}{m.oe && <td>{r.oe != null ? r.oe.toFixed(2) : "—"}</td>}
+                    {showOe && m.oe && <td>{f(r.expected)}</td>}{showOe && m.oe && <td>{r.oe != null ? r.oe.toFixed(2) : "—"}</td>}
                   </tr>))}
                 </tbody>
               </table>
@@ -383,7 +384,7 @@ function MetricPage({ id, F }) {
             <p className="muted small">Click a bar to list the episodes behind it. Groups with n &lt; {MIN_N} are greyed (⚠).</p>
           </section>
 
-          {m.oe && (
+          {showOe && m.oe && (
             <section className="card">
               <h2>Observed vs expected by {stratLabel}</h2>
               <p className="muted small">{m.id === "mortality"
@@ -430,18 +431,26 @@ function MetricPage({ id, F }) {
 // Unit comparison heatmap
 // ----------------------------------------------------------------------------
 function Units({ F }) {
-  const state = useApi(`/api/units${query(F)}`);
+  return <ComparisonPage F={F} endpoint="/api/units" pageTitle="ICU comparison" groupLabel="ICU" groupField="unit" />;
+}
+
+function Hospitals({ F }) {
+  return <ComparisonPage F={F} endpoint="/api/hospitals" pageTitle="Hospital comparison" groupLabel="Hospital" groupField="hospital" />;
+}
+
+function ComparisonPage({ F, endpoint, pageTitle, groupLabel, groupField }) {
+  const state = useApi(`${endpoint}${query(F)}`);
   return (
     <Loading state={state}>{(data) => (
       <div>
         <div className="page-head">
-          <h1>ICU comparison</h1>
-          <p className="lede">Each cell is the measure for one ICU under the current filters. Icons show target status; grey cells have fewer than {MIN_N} in the denominator. Click a cell to see its episodes.</p>
+          <h1>{pageTitle}</h1>
+          <p className="lede">Each cell is the measure for one {groupLabel} under the current filters. Icons show target status; grey cells have fewer than {MIN_N} in the denominator. Click a cell to see its episodes.</p>
         </div>
         <div className="card scroll-x">
           <table className="heat">
             <thead>
-              <tr><th>Measure</th><th>All ICUs</th>{data.units.map((u) => <th key={u}>{u}</th>)}</tr>
+              <tr><th>Measure</th><th>All {groupLabel}s</th>{data.groups.map((group) => <th key={group}>{group}</th>)}</tr>
             </thead>
             <tbody>
               {data.rows.map((row) => {
@@ -450,8 +459,8 @@ function Units({ F }) {
                   <tr key={row.id}>
                     <th scope="row"><a href={`#/metric/${row.id}`}><span className="h-num sm">{meta.number}</span>{meta.short}</a></th>
                     <HeatCell a={row.all} meta={meta} />
-                    {data.units.map((u) => (
-                      <HeatCell key={u} a={row.cells[u]} meta={meta} onClick={() => go("patients", `${row.id}|unit|${u}`)} />
+                    {data.groups.map((group) => (
+                      <HeatCell key={group} a={row.cells[group]} meta={meta} onClick={() => go("patients", `${row.id}|${groupField}|${group}`)} />
                     ))}
                   </tr>
                 );
@@ -786,7 +795,7 @@ function App() {
   const [theme, setTheme] = useState(null);
   const count = useApi(`/api/episodes${query(F, { limit: 0 })}`);
   useEffect(() => { if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme; }, [theme]);
-  const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"], ["patients", "Episodes"], ["timeline", "Timeline"], ["quality", "Data quality"]];
+  const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"], ["hospitals", "Hospital comparison"], ["patients", "Episodes"], ["timeline", "Timeline"], ["quality", "Data quality"]];
   return (
     <div className="shell viz-root">
       <header className="top">
@@ -814,6 +823,7 @@ function App() {
           {route.page === "overview" && <Overview F={F} />}
           {route.page === "metric" && <MetricPage id={route.arg || "ltvv"} F={F} key={(route.arg || "ltvv").split("@")[0]} />}
           {route.page === "units" && <Units F={F} />}
+          {route.page === "hospitals" && <Hospitals F={F} />}
           {route.page === "patients" && <Patients F={F} arg={route.arg} />}
           {route.page === "timeline" && <Timeline F={F} arg={route.arg} />}
           {route.page === "quality" && <Quality F={F} />}

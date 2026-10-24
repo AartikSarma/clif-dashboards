@@ -1,9 +1,13 @@
 # Built tables, dashboards, and API caches carry hospitalization IDs and dates: never commit them.
 /output/
+/output/**
 /dist/
 *.parquet
 *.duckdb
 dashboard_data.json
+*.csv
+*.log
+!src/clif_dash/upstream/reference/proning_global_coefficients.csv
 
 .venv/
 __pycache__/
@@ -14,6 +18,12 @@ web/dist/
 
 # Site configs hold local paths; share only the template and the synthetic example
 config/*.yaml
+config/*.yml
 !config/site_template.yaml
 !config/synth_10k.yaml
 !config/decisions.yaml
+
+# Local secrets / machine-specific files
+.env
+.env.*
+config/nu.yaml

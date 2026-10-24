@@ -76,6 +76,14 @@ def test_unit_comparison_matches_upstream_aggregation(client, upstream_aggregate
             close(ours, cell, f"{metric_id}.{unit}")
 
 
+def test_hospital_comparison_matches_upstream_aggregation(client, upstream_aggregates):
+    table = {row["id"]: row for row in client.get("/api/hospitals").json()["rows"]}
+    for metric_id, expected in upstream_aggregates.items():
+        for hospital, cell in expected["hospitals"].items():
+            ours = {k: v for k, v in table[metric_id]["cells"][hospital].items() if k != "key"}
+            close(ours, cell, f"{metric_id}.{hospital}")
+
+
 def test_control_limits_match_upstream(client, upstream_aggregates):
     for metric_id in ("height_doc", "mortality", "trach"):
         page = client.get(f"/api/metric/{metric_id}").json()

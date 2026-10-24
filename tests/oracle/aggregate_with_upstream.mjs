@@ -7,6 +7,7 @@ const data = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const rowsFor = (m) => (m.source === "proning" ? data.proning : data.episodes);
 const months = [...new Set(data.episodes.map((r) => r.month).concat(data.proning.map((r) => r.month)))].sort();
 const units = [...new Set(data.episodes.map((r) => r.unit).filter((v) => v != null))].sort();
+const hospitals = [...new Set(data.episodes.map((r) => r.hospital).filter((v) => v != null))].sort();
 const out = {};
 for (const m of METRICS) {
   const rows = rowsFor(m);
@@ -18,6 +19,7 @@ for (const m of METRICS) {
     series,
     control: m.agg.kind === "ratio" ? pChart(series) : null,
     units: Object.fromEntries(units.map((u) => [u, aggregate(m, rows.filter((r) => r.unit === u))])),
+    hospitals: Object.fromEntries(hospitals.map((h) => [h, aggregate(m, rows.filter((r) => r.hospital === h))])),
   };
 }
 process.stdout.write(JSON.stringify(out));
