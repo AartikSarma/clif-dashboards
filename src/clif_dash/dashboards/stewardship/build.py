@@ -96,7 +96,57 @@ def in_window(days: pd.Series, cfg: SiteConfig) -> pd.Series:
 # Whole-table counts (DuckDB over the full source table)
 # --------------------------------------------------------------------------- #
 def site_statistics(con, cfg: SiteConfig) -> dict:
-    return {}
+    """When the site's records begin and end, over whole tables: the first and last
+    administered dose of a counted agent by a counted route, and the first and last
+    hospital admission."""
+    decisions = cfg.decisions()
+    shared = shared_values(decisions)
+    groups = group_agents(decisions)
+    agents = ", ".join(f"'{a}'" for a in sorted(set().union(*(a for a, _ in groups.values()))))
+    actions = ", ".join(f"'{a.lower()}'" for a in shared["administered_actions"])
+    routes = ", ".join(f"'{r.lower()}'" for r in shared["routes"])
+    first, last = con.execute(f"""
+        SELECT min(admin_dttm), max(admin_dttm)
+        FROM read_parquet('{cfg.table_path("medication_admin_intermittent")}')
+        WHERE lower(CAST(med_category AS VARCHAR)) IN ({agents})
+          AND lower(CAST(mar_action_group AS VARCHAR)) IN ({actions})
+          AND lower(CAST(med_route_category AS VARCHAR)) IN ({routes})
+    """).fetchone()
+    first_admission, last_admission = con.execute(
+        f"SELECT min(admission_dttm), max(admission_dttm) FROM read_parquet('{cfg.table_path('hospitalization')}')"
+    ).fetchone()
+    return {"medication_records": {"first_dose": utc_text(first), "last_dose": utc_text(last),
+                                   "first_admission": utc_text(first_admission),
+                                   "last_admission": utc_text(last_admission)}}
+
+
+def utc_text(value) -> str | None:
+    """A DuckDB timestamp as UTC text, so it pickles to workers and saves to summary.json."""
+    if value is None:
+        return None
+    stamp = pd.Timestamp(value)
+    return str(stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC"))
+
+
+def covered_months(statistics: dict, tz: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """The first and last local days of the whole months inside both the medication
+    records and the span of hospital admissions.
+
+    Before the first recorded dose an ICU day cannot show therapy. After the last
+    admission, the ICU holds only patients admitted earlier, who stay longest and are
+    the most treated, so use reads falsely high; before the first admission the data
+    lack patients already in hospital. The edge months are only partly recorded. None
+    when there are no recorded doses.
+    """
+    records = statistics.get("medication_records", {})
+    if not records.get("first_dose"):
+        return None
+    local = lambda text: pd.Timestamp(text).tz_convert(tz).tz_localize(None).normalize()
+    first = max(local(records["first_dose"]), local(records["first_admission"]))
+    last = min(local(records["last_dose"]), local(records["last_admission"]))
+    start = first if first.day == 1 else first + pd.offsets.MonthBegin(1)
+    end = last if last.is_month_end else last.replace(day=1) - pd.Timedelta(days=1)
+    return start, end
 
 
 def data_quality(con, cfg: SiteConfig) -> dict:
@@ -188,6 +238,13 @@ def build(site: SiteBuild) -> BuildResult:
     intervals.to_parquet(work / "icu_intervals.parquet", index=False)
     days = days_present(intervals, tz)
     days = days[in_window(days["day"], cfg)].reset_index(drop=True)
+    icu_encounters, icu_days = int(days["encounter_block"].nunique()), int(len(days))
+    coverage = covered_months(site.site_statistics, tz) \
+        if shared_values(cfg.decisions())["medication_coverage"] == "whole_months" else None
+    if coverage is not None:
+        days = days[(days["day"] >= coverage[0]) & (days["day"] <= coverage[1])].reset_index(drop=True)
+        log(f"Medication records and admissions cover whole months {coverage[0]:%Y-%m} to {coverage[1]:%Y-%m}; "
+            f"{icu_days - len(days):,} ICU days outside them left out")
     log(f"Days present: {len(days):,} in {days['encounter_block'].nunique():,} adult encounters with ICU time")
 
     icu_blocks = days["encounter_block"].unique()
@@ -228,7 +285,9 @@ def build(site: SiteBuild) -> BuildResult:
     funnel = [
         {"step": "Encounters after linking", "n": int(len(encounters))},
         {"step": "Adults", "n": int(len(adults))},
-        {"step": "Adults with ICU time", "n": int(rows["encounter_block"].nunique())},
+        {"step": "Adults with ICU time", "n": icu_encounters},
+        {"step": "With ICU time in whole months of medication records" if coverage is not None
+         else "With ICU time (medication-record coverage not applied)", "n": int(rows["encounter_block"].nunique())},
         {"step": "ICU stay-months (encounter, unit, month)", "n": int(len(rows)), "unit": "rows"},
         {"step": "Days present", "n": int(rows["days_present"].sum()), "unit": "days"},
     ]
@@ -237,5 +296,8 @@ def build(site: SiteBuild) -> BuildResult:
         tables={"stay_months": rows},
         summary={"funnel": funnel},
         meta={"months": sorted(rows["month"].unique().tolist())},
-        data_quality={"icu_rows_without_end": unended, "antimicrobial_administrations": counts},
+        data_quality={"icu_rows_without_end": unended, "antimicrobial_administrations": counts,
+                      "months_counted": None if coverage is None else
+                      {"first": f"{coverage[0]:%Y-%m}", "last": f"{coverage[1]:%Y-%m}",
+                       "icu_days_left_out": icu_days - int(rows["days_present"].sum())}},
     )

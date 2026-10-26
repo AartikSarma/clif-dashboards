@@ -6,6 +6,7 @@ local time (America/Los_Angeles, UTC-8 in winter) and stored in UTC, as CLIF doe
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -24,7 +25,8 @@ def local(text: str) -> pd.Timestamp:
     return pd.Timestamp(text, tz=TZ).tz_convert("UTC")
 
 
-def write_site(folder: Path) -> Path:
+def write_site(folder: Path, coverage: str = "all") -> Path:
+    """The hand-made site; `coverage` sets the medication_coverage decision."""
     patients = pd.DataFrame({
         "patient_id": ["P1", "P2", "P3", "P4", "P5", "P6"],
         "sex_category": ["Female", "Male", "Female", "Male", "Female", "Male"],
@@ -103,8 +105,14 @@ def write_site(folder: Path) -> Path:
     for name, frame in [("patient", patients), ("hospitalization", hospitalizations), ("adt", adt),
                         ("medication_admin_intermittent", meds)]:
         frame.to_parquet(folder / f"clif_{name}.parquet", index=False)
+    decisions = yaml.safe_load((REPO / "config" / "decisions" / "stewardship.yaml").read_text())
+    for decision in decisions["shared"]:
+        if decision["id"] == "medication_coverage":
+            decision["value"] = coverage
+    (folder / "stewardship_decisions.yaml").write_text(yaml.safe_dump(decisions, allow_unicode=True))
     site = {"clif_dir": str(folder), "output_dir": str(folder / "output"), "site_timezone": TZ,
             "decisions_dir": str(REPO / "config" / "decisions"), "dashboards": ["stewardship"],
+            "decisions": {"stewardship": str(folder / "stewardship_decisions.yaml")},
             "encounters_per_chunk": 2, "workers": 1}
     (folder / "site.yaml").write_text(yaml.safe_dump(site))
     return folder / "site.yaml"
@@ -142,3 +150,16 @@ def test_rows_have_unique_ids_even_across_hospitals(stay_months):
 @pytest.mark.parametrize("key", list(EXPECTED))
 def test_hand_counted_days_and_days_of_therapy(stay_months, key):
     assert stay_months.loc[key, COLUMNS].astype(int).tolist() == EXPECTED[key]
+
+
+def test_only_whole_months_inside_the_medication_records_count(tmp_path):
+    """The first recorded dose is Jan 10 and the last May 4, so only February to April count:
+    January's rows (H1, H2) and May's (H6) are left out, and the rest are unchanged."""
+    output = build(load_config(write_site(tmp_path, coverage="whole_months")), STEWARDSHIP)
+    rows = pd.read_parquet(output / "stay_months.parquet").set_index(["label_id", "hospital", "unit", "month"])
+    kept = [key for key in EXPECTED if "2024-02" <= key[3] <= "2024-04"]
+    assert set(rows.index) == set(kept)
+    for key in kept:
+        assert rows.loc[key, COLUMNS].astype(int).tolist() == EXPECTED[key]
+    summary = json.loads((output / "summary.json").read_text())
+    assert summary["data_quality"]["months_counted"] == {"first": "2024-02", "last": "2024-04", "icu_days_left_out": 10}

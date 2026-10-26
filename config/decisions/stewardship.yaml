@@ -34,6 +34,13 @@ shared:
     alternatives: [Midnight census]
     source: NHSN AU Option (days present)
 
+  - id: medication_coverage
+    label: Months counted
+    value: whole_months
+    display: "Only whole months inside both the site's medication records (first to last recorded antimicrobial dose) and its admissions (first to last hospital admission). Before medication records begin, ICU days cannot show therapy, so use reads falsely low. After the last admission, the ICU holds only patients admitted earlier, who stay longest and receive the most antibiotics, so use reads falsely high. Edge months are only partly recorded. Set start_date and end_date in the site config to narrow the window further"
+    alternatives: [all (every month with ICU days)]
+    source: Local choice
+
   - id: missing_icu_end
     label: Open ICU stays
     value: encounter_discharge
@@ -293,3 +300,5 @@ metrics:
 changelog:
   - date: 2026-10-20
     change: Initial definitions from the NHSN AU Option and the SAAR guide (2017/2018 baseline, adult groups)
+  - date: 2026-10-26
+    change: "Count only whole months inside the site's medication records and admissions: a site's first months can have ICU days with no administrations recorded yet, and the months after its last admission hold only long-staying patients"

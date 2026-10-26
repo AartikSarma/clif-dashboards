@@ -781,6 +781,7 @@ function Quality({ F }) {
       if ((dq.semi_prone_names || []).length) notes.push(`Position names mapped to prone that contain "semi": ${dq.semi_prone_names.join(", ")}. Review the mCIDE mapping.`);
       if (dq.respiratory_rows_without_time) notes.push(`${dq.respiratory_rows_without_time.toLocaleString()} respiratory_support rows have no recorded_dttm and were left out of the ventilator timeline.`);
       if (dq.icu_rows_without_location_type) notes.push(`${dq.icu_rows_without_location_type} ICU ADT rows have no location_type: they appear as "ICU (type not mapped)".`);
+      if (dq.months_counted) notes.push(`Months counted: ${dq.months_counted.first} to ${dq.months_counted.last}, the whole months inside both the medication records and the span of admissions. ${dq.months_counted.icu_days_left_out.toLocaleString()} ICU days outside them are left out, because use there would read falsely low (no doses recorded yet) or high (only long-staying patients left).`);
       if (dq.icu_rows_without_end) notes.push(`${dq.icu_rows_without_end.toLocaleString()} ICU ADT rows have no out time and no discharge time, so they add no days present.`);
       if (dq.antimicrobial_rows_without_time) notes.push(`${dq.antimicrobial_rows_without_time.toLocaleString()} antimicrobial administrations have no admin_dttm and are not counted.`);
       if (dq.unmapped_mar_action_rows) notes.push(`${dq.unmapped_mar_action_rows.toLocaleString()} intermittent medication rows have an unmapped MAR action (mar_action_group "other") and are not counted as doses.`);
