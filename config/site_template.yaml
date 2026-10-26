@@ -13,4 +13,4 @@ output_dir: ../output/my_site         # built tables and staged data, one folder
 dashboards: [respiratory]             # dashboards to build and serve: respiratory, stewardship
 encounters_per_chunk: 2000            # phase A chunk size (respiratory_support only)
 cohort_encounters_per_chunk: 300      # phase B chunk size (all large tables); lower it if workers run out of memory
-workers: 4                            # parallel worker processes
+workers: 4                            # parallel worker processes; up to one fewer than the machine's cores

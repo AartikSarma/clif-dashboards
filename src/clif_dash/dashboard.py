@@ -30,9 +30,21 @@ def log(message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')} | peak {peak_gb:.1f} GB] {message}", flush=True)
 
 
-def assign_chunks(encounter_blocks, encounters_per_chunk: int) -> pd.DataFrame:
+CHUNKS_PER_WORKER = 4
+
+
+def assign_chunks(encounter_blocks, encounters_per_chunk: int, workers: int = 1) -> pd.DataFrame:
+    """Split encounters into chunks of at most `encounters_per_chunk`.
+
+    With several workers, chunks are also small enough that each worker gets about
+    CHUNKS_PER_WORKER of them: one chunk per worker leaves the others idle while the
+    slowest finishes, and a pool with fewer chunks than workers leaves workers unused.
+    """
     blocks = np.sort(np.asarray(pd.unique(encounter_blocks)))
-    return pd.DataFrame({"encounter_block": blocks, "chunk": np.arange(len(blocks)) // encounters_per_chunk})
+    size = encounters_per_chunk
+    if workers > 1 and len(blocks):
+        size = max(1, min(size, -(-len(blocks) // (workers * CHUNKS_PER_WORKER))))
+    return pd.DataFrame({"encounter_block": blocks, "chunk": np.arange(len(blocks)) // size})
 
 
 # --------------------------------------------------------------------------- #

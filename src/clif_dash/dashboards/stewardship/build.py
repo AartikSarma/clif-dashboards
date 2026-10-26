@@ -191,7 +191,7 @@ def build(site: SiteBuild) -> BuildResult:
     log(f"Days present: {len(days):,} in {days['encounter_block'].nunique():,} adult encounters with ICU time")
 
     icu_blocks = days["encounter_block"].unique()
-    chunks = assign_chunks(icu_blocks, cfg.encounters_per_chunk)
+    chunks = assign_chunks(icu_blocks, cfg.encounters_per_chunk, cfg.workers)
     agent_list = ", ".join(f"'{a}'" for a in sorted(set().union(*(agents for agents, _ in groups.values()))))
     staged = site.stage("medication_admin_intermittent", site.mapping.merge(chunks, on="encounter_block"), "therapy",
                         where=f"lower(CAST(source.med_category AS VARCHAR)) IN ({agent_list})")

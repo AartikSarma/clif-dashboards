@@ -822,7 +822,7 @@ function Quality({ F }) {
             <section className="card">
               <h2>Tables loaded</h2>
               <table className="dtable num"><tbody>{Object.entries(dq.row_counts).map(([k, v]) => <tr key={k}><td><code>{k}</code></td><td>{v.toLocaleString()} rows</td>{dq.outliers && <td className="muted">{(dq.outliers[k] ?? Object.entries(dq.outliers).filter(([kk]) => kk.startsWith(k + ".")).reduce((s, [, n]) => s + n, 0)) || 0} outliers set to missing</td>}</tr>)}</tbody></table>
-              {dq.outliers && <p className="muted small">Outlier counts cover the rows the build read: adult encounters for respiratory support, cohort encounters for the other tables.</p>}
+              {dq.outliers && <p className="muted small">Outlier counts cover the rows the build read: respiratory support for adult encounters with any row that could be IMV, the other tables for cohort encounters.</p>}
             </section>
             {("mortality_model" in dq || "proning_model" in dq) && <section className="card">
               <h2>Models</h2>

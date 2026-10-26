@@ -53,6 +53,30 @@ def shared_values(decisions: dict) -> dict:
     return {d["id"]: d["value"] for d in decisions["shared"]}
 
 
+# The waterfall marks a row IMV only when it says so, or when it names no device and has an IMV mode
+# (clifpy waterfall step 1-a); later steps only carry IMV forward from such rows.
+IMV_MODES = "assist control-volume control|simv|pressure control"
+
+
+def ventilated_blocks(con, cfg: SiteConfig, mapping: pd.DataFrame) -> set:
+    """Encounters with at least one respiratory_support row the waterfall could mark IMV.
+
+    The waterfall works encounter by encounter, so leaving the others out changes no
+    IMV episode, and it is most of the build's time (a Python call per mode block).
+    """
+    con.register("encounter_map", mapping[["hospitalization_id", "encounter_block"]])
+    rows = con.execute(f"""
+        SELECT DISTINCT m.encounter_block
+        FROM read_parquet('{cfg.table_path("respiratory_support")}') AS r
+        JOIN encounter_map AS m ON CAST(r.hospitalization_id AS VARCHAR) = m.hospitalization_id
+        WHERE lower(CAST(r.device_category AS VARCHAR)) = 'imv'
+           OR (r.device_category IS NULL AND r.device_name IS NULL
+               AND regexp_matches(lower(CAST(r.mode_category AS VARCHAR)), '{IMV_MODES}'))
+    """).fetchall()
+    con.unregister("encounter_map")
+    return {block for (block,) in rows}
+
+
 def drop_untimed_rows(respiratory_support: pd.DataFrame) -> pd.DataFrame:
     """Drop respiratory_support rows with no recorded_dttm before the waterfall.
 
@@ -229,11 +253,13 @@ def build(site: SiteBuild) -> BuildResult:
     n_hospitalizations = int(stage.read_whole_table(cfg, "hospitalization")["hospitalization_id"].nunique())
 
     # ---- phase A ----------------------------------------------------------
-    chunks_a = assign_chunks(adults["encounter_block"], cfg.encounters_per_chunk)
+    ventilated = ventilated_blocks(con, cfg, mapping)
+    candidates = adults.loc[adults["encounter_block"].isin(ventilated), "encounter_block"]
+    chunks_a = assign_chunks(candidates, cfg.encounters_per_chunk, cfg.workers)
     chunks_a.to_parquet(work / "chunks_a.parquet", index=False)
     staged = site.stage("respiratory_support", mapping.merge(chunks_a, on="encounter_block"), "phase_a")
-    log(f"Phase A: {len(adults):,} adult encounters in {chunks_a['chunk'].nunique()} chunks; "
-        f"{staged:,} respiratory_support rows staged")
+    log(f"Phase A: {len(candidates):,} of {len(adults):,} adult encounters have a row that could be IMV; "
+        f"{chunks_a['chunk'].nunique()} chunks, {staged:,} respiratory_support rows staged")
     results_a = site.run_chunks(phase_a_chunk, sorted(chunks_a["chunk"].unique()))
     episodes = pd.concat([r["episodes"] for r in results_a if len(r["episodes"])], ignore_index=True)
     runs = pd.concat([r["runs"] for r in results_a if len(r["runs"])], ignore_index=True)
@@ -258,7 +284,7 @@ def build(site: SiteBuild) -> BuildResult:
 
     # ---- phase B ----------------------------------------------------------
     cohort_blocks = episodes["encounter_block"].unique()
-    chunks_b = assign_chunks(cohort_blocks, cfg.cohort_encounters_per_chunk)
+    chunks_b = assign_chunks(cohort_blocks, cfg.cohort_encounters_per_chunk, cfg.workers)
     chunks_b.to_parquet(work / "chunks_b.parquet", index=False)
     episodes.to_parquet(work / "episodes_a.parquet", index=False)
     runs[runs["encounter_block"].isin(cohort_blocks)].to_parquet(work / "runs_a.parquet", index=False)
