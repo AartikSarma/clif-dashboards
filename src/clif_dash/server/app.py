@@ -150,16 +150,24 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "funnel": funnel_for(metric.source),
         })
 
-    @router.get("/units")
-    def units(request: Request):
+    def comparison(request: Request, column: str):
+        """Every measure for each value of `column` (ICU or hospital), beside the measure for all of them."""
         tables = filtered(request)
-        unit_names = sorted(tables[primary]["unit"].dropna().unique().tolist())
+        names = sorted(tables[primary][column].dropna().unique().tolist())
         table = []
         for metric in metrics:
             rows = tables[metric.source]
-            cells = {g["key"]: g for g in agg.by_group(metric, rows, "unit", keys=unit_names)}
+            cells = {g["key"]: g for g in agg.by_group(metric, rows, column, keys=names)}
             table.append({"id": metric.id, "all": agg.aggregate(metric, rows), "cells": cells})
-        return jsonable({"units": unit_names, "rows": table})
+        return jsonable({"groups": names, "rows": table})
+
+    @router.get("/units")
+    def units(request: Request):
+        return comparison(request, "unit")
+
+    @router.get("/hospitals")
+    def hospitals(request: Request):
+        return comparison(request, "hospital")
 
     def row_selection(request: Request, metric_arg: str | None, field: str | None, value: str | None,
                       search: str | None, sort: str, direction: int):
