@@ -23,6 +23,8 @@ const countOf = (n, table) => `${n} ${n === 1 ? table.unit : table.unit_plural}`
 // Ratios and rates both pool a numerator over a denominator; means and medians report n.
 const pooled = (m) => m.kind === "ratio" || m.kind === "rate";
 const whole = (v) => (v == null ? 0 : Math.round(v).toLocaleString());
+// Observed/expected is shown unless the measure's decisions turn it off (show_expected: false)
+const showsExpected = (m) => Boolean(m.oe) && D.metrics[m.id].show_expected !== false;
 
 function setDashboard(id, meta) {
   DASH = id;
@@ -221,7 +223,7 @@ function Overview({ F }) {
                       <div className="tile-val">{fmt(a.value, meta, undefined, true)}</div>
                       <div className="tile-sub">
                         {pooled(m) ? `${whole(a.num)} / ${whole(a.den)} ${m.denLabel}` : `n ${a.n} ${m.denLabel}`}
-                        {a.oe != null && <span> · O/E {a.oe.toFixed(2)}</span>}
+                        {showsExpected(m) && a.oe != null && <span> · O/E {a.oe.toFixed(2)}</span>}
                       </div>
                       <div className="tile-foot">
                         <StatusChip s={s} meta={meta} />
@@ -327,7 +329,7 @@ function MetricPage({ id, F }) {
                   {pooled(m) ? `${whole(agg.num)} ${m.kind === "rate" ? "per" : "of"} ${whole(agg.den)} ${m.denLabel}` : `${m.kind} of ${agg.n} ${m.denLabel}${agg.q1 != null ? ` · IQR ${f(agg.q1)}–${f(agg.q3)}` : ""}`}
                 </span>
               </div>
-              {agg.oe != null && (
+              {showsExpected(m) && agg.oe != null && (
                 <div className="oe-line">
                   Observed {f(agg.value)} vs expected {f(agg.expected)} · <b>O/E {agg.oe.toFixed(2)}</b>
                   <span className="muted"> ({m.id === "mortality" ? "site-fitted model; compares groups with this site's average" : "CLIF consortium global coefficients"})</span>
@@ -395,11 +397,11 @@ function MetricPage({ id, F }) {
             )}
             {view === "table" && (
               <table className="dtable num">
-                <thead><tr><th>{stratLabel}</th><th>Value</th>{pooled(m) && <th>Numerator</th>}<th>{pooled(m) ? "Denominator" : "n"}</th>{m.oe && <th>Expected</th>}{m.oe && <th>O/E</th>}</tr></thead>
+                <thead><tr><th>{stratLabel}</th><th>Value</th>{pooled(m) && <th>Numerator</th>}<th>{pooled(m) ? "Denominator" : "n"}</th>{showsExpected(m) && <th>Expected</th>}{showsExpected(m) && <th>O/E</th>}</tr></thead>
                 <tbody>{strata.map((r) => (
                   <tr key={r.key}>
                     <td>{r.key}</td><td>{f(r.value)}</td>{pooled(m) && <td>{whole(r.num)}</td>}<td>{pooled(m) ? whole(r.den) : r.n}</td>
-                    {m.oe && <td>{f(r.expected)}</td>}{m.oe && <td>{r.oe != null ? r.oe.toFixed(2) : "—"}</td>}
+                    {showsExpected(m) && <td>{f(r.expected)}</td>}{showsExpected(m) && <td>{r.oe != null ? r.oe.toFixed(2) : "—"}</td>}
                   </tr>))}
                 </tbody>
               </table>
@@ -407,7 +409,7 @@ function MetricPage({ id, F }) {
             <p className="muted small">Click a bar to list the {PRIMARY.unit_plural} behind it.</p>
           </section>
 
-          {m.oe && (
+          {showsExpected(m) && (
             <section className="card">
               <h2>Observed vs expected by {stratLabel}</h2>
               <p className="muted small">{m.id === "mortality"
@@ -453,19 +455,26 @@ function MetricPage({ id, F }) {
 // ----------------------------------------------------------------------------
 // Unit comparison heatmap
 // ----------------------------------------------------------------------------
-function Units({ F }) {
-  const state = useApi(`${api("/units")}${query(F)}`);
+// ICU and hospital comparison: one heat-map page, grouped by either column
+const COMPARISONS = {
+  units: { endpoint: "/units", title: "ICU comparison", column: "unit", one: "ICU", all: "All ICUs" },
+  hospitals: { endpoint: "/hospitals", title: "Hospital comparison", column: "hospital", one: "hospital", all: "All hospitals" },
+};
+
+function Comparison({ F, by }) {
+  const { endpoint, title, column, one, all } = COMPARISONS[by];
+  const state = useApi(`${api(endpoint)}${query(F)}`);
   return (
     <Loading state={state}>{(data) => (
       <div>
         <div className="page-head">
-          <h1>ICU comparison</h1>
-          <p className="lede">Each cell is the measure for one ICU under the current filters. Icons show target status. Click a cell to see its {PRIMARY.unit_plural}.</p>
+          <h1>{title}</h1>
+          <p className="lede">Each cell is the measure for one {one} under the current filters. Icons show target status. Click a cell to see its {PRIMARY.unit_plural}.</p>
         </div>
         <div className="card scroll-x">
           <table className="heat">
             <thead>
-              <tr><th>Measure</th><th>All ICUs</th>{data.units.map((u) => <th key={u}>{u}</th>)}</tr>
+              <tr><th>Measure</th><th>{all}</th>{data.groups.map((g) => <th key={g}>{g}</th>)}</tr>
             </thead>
             <tbody>
               {data.rows.map((row) => {
@@ -474,8 +483,8 @@ function Units({ F }) {
                   <tr key={row.id}>
                     <th scope="row"><a href={route("metric", row.id)}><span className="h-num sm">{meta.number}</span>{meta.short}</a></th>
                     <HeatCell a={row.all} meta={meta} />
-                    {data.units.map((u) => (
-                      <HeatCell key={u} a={row.cells[u]} meta={meta} onClick={() => go("patients", `${row.id}|unit|${u}`)} />
+                    {data.groups.map((g) => (
+                      <HeatCell key={g} a={row.cells[g]} meta={meta} onClick={() => go("patients", `${row.id}|${column}|${g}`)} />
                     ))}
                   </tr>
                 );
@@ -848,7 +857,8 @@ function App({ dashboards }) {
   const [theme, setTheme] = useState(null);
   const count = useApi(`${api("/rows")}${query(F, { limit: 0 })}`);
   useEffect(() => { if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme; }, [theme]);
-  const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"], ["patients", cap(PRIMARY.unit_plural)],
+  const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"],
+    ...((META.filter_options.hospital || []).length > 1 ? [["hospitals", "Hospital comparison"]] : []), ["patients", cap(PRIMARY.unit_plural)],
     ...(META.dashboard.detail ? [["timeline", "Timeline"]] : []), ["quality", "Data quality"]];
   const firstMetric = METRICS[0].id;
   return (
@@ -879,7 +889,7 @@ function App({ dashboards }) {
         <main>
           {route_.page === "overview" && <Overview F={F} />}
           {route_.page === "metric" && <MetricPage id={route_.arg || firstMetric} F={F} key={(route_.arg || firstMetric).split("@")[0]} />}
-          {route_.page === "units" && <Units F={F} />}
+          {(route_.page === "units" || route_.page === "hospitals") && <Comparison F={F} by={route_.page} key={route_.page} />}
           {route_.page === "patients" && <Patients F={F} arg={route_.arg} />}
           {route_.page === "timeline" && META.dashboard.detail && <Timeline F={F} arg={route_.arg} />}
           {route_.page === "quality" && <Quality F={F} />}

@@ -223,6 +223,7 @@ metrics:
     target: null
     numerator: Patients whose first prone session started ≤ 12 h after enrollment
     denominator: Proning cohort (PROSEVA-eligible, see decisions)
+    show_expected: false   # the build still computes expected proning and O/E; set true to show them
     decisions: &prone_decisions
       - id: cohort
         label: Cohort
@@ -311,7 +312,7 @@ metrics:
       - id: risk_model
         label: Expected proning
         value: global_coefficients
-        display: "Logistic model with the consortium's global coefficients: age, sex, BMI, norepinephrine-equivalent category, SOFA, minimum P/F (24 h before enrollment)"
+        display: "Logistic model with the consortium's global coefficients: age, sex, BMI, norepinephrine-equivalent category, SOFA, minimum P/F (24 h before enrollment). Computed, but observed/expected is not shown on the dashboard"
         alternatives: [Site-fitted model]
         source: CLIF proning study script 02
 
@@ -699,3 +700,5 @@ changelog:
     change: Initial defaults from the planning doc
   - date: 2026-10-12
     change: "Paralytic > 8 h/day (8b): target < 10%, denominator restricted to days in an ICU location, paralytics also matched by drug name"
+  - date: 2026-10-26
+    change: "Proned within 12 h: observed/expected hidden on the dashboard (show_expected: false), as on Cathy Gao-Howard's site branch; expected proning is still computed"
