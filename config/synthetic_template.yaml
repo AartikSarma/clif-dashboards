@@ -1,0 +1,19 @@
+# The synthetic CLIF dataset used for development and tests. Copy this file to
+# config/synth_10k.yaml (gitignored) and point clif_dir at your copy of the data:
+#   gh release download v0.7.0 -R Common-Longitudinal-ICU-data-Format/synthetic_clif -p synth_clif_10k.tar.gz
+#   mkdir -p ../synthetic_clif/synth_clif_10k && tar -xzf synth_clif_10k.tar.gz -C ../synthetic_clif/synth_clif_10k
+# The tests compare against outputs saved from exactly that release (v0.7.0).
+# Paths resolve from this folder.
+clif_dir: ../../synthetic_clif/synth_clif_10k
+filetype: parquet
+file_prefix: clif_
+site_name: Synthetic CLIF 10k
+site_timezone: America/Los_Angeles   # the tests' saved outputs were built in this zone
+start_date:
+end_date:
+decisions_dir: decisions
+output_dir: ../output/synth_10k
+dashboards: [respiratory, stewardship]
+encounters_per_chunk: 2000
+cohort_encounters_per_chunk: 300
+workers: 4

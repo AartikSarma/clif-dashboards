@@ -10,7 +10,7 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(prog="clif-dash", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     build_parser = commands.add_parser("build", help="compute each dashboard's metric tables")
-    build_parser.add_argument("--config", required=True, help="site YAML (see config/synth_10k.yaml)")
+    build_parser.add_argument("--config", required=True, help="site YAML (copy config/site_template.yaml)")
     build_parser.add_argument("--clif-dir", help="override clif_dir from the config")
     build_parser.add_argument("--workers", type=int, help="override the number of worker processes")
     build_parser.add_argument("--dashboard", action="append", dest="dashboards", metavar="ID",

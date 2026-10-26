@@ -16,11 +16,11 @@ node_modules/
 .DS_Store
 web/dist/
 
-# Site configs hold local paths; share only the template and the synthetic example
+# Site configs hold local paths (including config/synth_10k.yaml); share only the templates
 config/*.yaml
 config/*.yml
 !config/site_template.yaml
-!config/synth_10k.yaml
+!config/synthetic_template.yaml
 
 # Local secrets
 .env

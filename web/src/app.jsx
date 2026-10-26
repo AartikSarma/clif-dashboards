@@ -555,6 +555,11 @@ const STEWARDSHIP_LIST = {
 };
 const LISTS = { respiratory: RESPIRATORY_LIST, stewardship: STEWARDSHIP_LIST };
 
+// Detail views, by dashboard id: { tab label, component }. A dashboard gets the tab only when
+// its server side has a detail builder and the UI has a view registered here.
+const DETAILS = { respiratory: { label: "Timeline", hint: " Click a row for its hourly timeline.", view: (props) => <Timeline {...props} /> } };
+const detailView = () => (META.dashboard.detail ? DETAILS[DASH] : null);
+
 function Patients({ F, arg }) {
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
@@ -574,7 +579,7 @@ function Patients({ F, arg }) {
     <div>
       <div className="page-head">
         <h1>{cap(PRIMARY.unit_plural)}</h1>
-        <p className="lede">One row per {PRIMARY.unit}. Only hospitalization IDs are shown.{META.dashboard.detail ? " Click a row for its hourly timeline." : ""}</p>
+        <p className="lede">One row per {PRIMARY.unit}. Only hospitalization IDs are shown.{detailView() ? detailView().hint : ""}</p>
       </div>
       <div className="card">
         <div className="card-head">
@@ -597,8 +602,8 @@ function Patients({ F, arg }) {
                     {lab}{sk === c ? (sd > 0 ? " ▲" : " ▼") : ""}
                   </th>))}</tr></thead>
                 <tbody>{data.rows.map((e) => (
-                  <tr key={e[idColumn]} onClick={META.dashboard.detail ? () => go("timeline", e[idColumn]) : undefined}
-                    className={META.dashboard.detail ? "clickable" : ""}>
+                  <tr key={e[idColumn]} onClick={detailView() ? () => go("timeline", e[idColumn]) : undefined}
+                    className={detailView() ? "clickable" : ""}>
                     {listColumns(data.threshold, data.rows).map(([c]) => <td key={c}>{cell(e, c, data.numerator_column)}</td>)}
                   </tr>))}
                 </tbody>
@@ -859,7 +864,7 @@ function App({ dashboards }) {
   useEffect(() => { if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme; }, [theme]);
   const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"],
     ...((META.filter_options.hospital || []).length > 1 ? [["hospitals", "Hospital comparison"]] : []), ["patients", cap(PRIMARY.unit_plural)],
-    ...(META.dashboard.detail ? [["timeline", "Timeline"]] : []), ["quality", "Data quality"]];
+    ...(detailView() ? [["timeline", detailView().label]] : []), ["quality", "Data quality"]];
   const firstMetric = METRICS[0].id;
   return (
     <div className="shell viz-root">
@@ -891,7 +896,7 @@ function App({ dashboards }) {
           {route_.page === "metric" && <MetricPage id={route_.arg || firstMetric} F={F} key={(route_.arg || firstMetric).split("@")[0]} />}
           {(route_.page === "units" || route_.page === "hospitals") && <Comparison F={F} by={route_.page} key={route_.page} />}
           {route_.page === "patients" && <Patients F={F} arg={route_.arg} />}
-          {route_.page === "timeline" && META.dashboard.detail && <Timeline F={F} arg={route_.arg} />}
+          {route_.page === "timeline" && detailView() && detailView().view({ F, arg: route_.arg })}
           {route_.page === "quality" && <Quality F={F} />}
         </main>
       </div>

@@ -29,8 +29,8 @@ def single_file_decisions(tmp_path: Path, **changed_values) -> Path:
     return path
 
 
-def test_site_wide_decisions_come_first():
-    cfg = load_config(REPO / "config" / "synth_10k.yaml").bind("respiratory")
+def test_site_wide_decisions_come_first(tmp_path):
+    cfg = load_config(site_yaml(tmp_path)).bind("respiratory")
     ids = [d["id"] for d in cfg.decisions()["shared"]]
     platform_ids = [d["id"] for d in yaml.safe_load((DECISIONS / "platform.yaml").read_text())["shared"]]
     assert ids[:len(platform_ids)] == platform_ids
