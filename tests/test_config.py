@@ -71,3 +71,11 @@ def test_a_retired_decision_in_an_old_site_copy_is_dropped(tmp_path):
     copy.write_text(yaml.safe_dump(old, allow_unicode=True))
     cfg = load_config(site_yaml(tmp_path, decisions_file=str(copy))).bind("respiratory")
     assert "small_cell_n" not in [d["id"] for d in cfg.decisions()["shared"]]
+
+
+def test_a_config_without_a_dashboards_list_gets_every_dashboard(tmp_path):
+    from clif_dash.config import DEFAULT_DASHBOARDS
+    from clif_dash.dashboards import DASHBOARDS
+
+    assert load_config(site_yaml(tmp_path)).dashboards == DEFAULT_DASHBOARDS
+    assert set(DEFAULT_DASHBOARDS) == set(DASHBOARDS)   # a new dashboard must be added to the default too

@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 
 PLATFORM_DECISIONS = "platform"
+# What a site config without a `dashboards:` list builds and serves
+DEFAULT_DASHBOARDS = ("respiratory", "stewardship", "microbiology")
 # Decisions the code no longer reads; a site copy written before their removal may still list them
 RETIRED_DECISIONS = {"small_cell_n"}
 # Where the single decisions file lived before it was split into config/decisions/
@@ -28,7 +30,7 @@ class SiteConfig:
     encounters_per_chunk: int
     cohort_encounters_per_chunk: int
     workers: int
-    dashboards: tuple[str, ...] = ("respiratory",)   # dashboards this site builds and serves
+    dashboards: tuple[str, ...] = DEFAULT_DASHBOARDS  # dashboards this site builds and serves
     dashboard: str | None = None                      # set by bind(): the dashboard being built or served
 
     def table_path(self, table: str) -> Path:
@@ -131,5 +133,5 @@ def load_config(config_path: str | Path, clif_dir_override: str | None = None) -
         encounters_per_chunk=int(raw.get("encounters_per_chunk", 2000)),
         cohort_encounters_per_chunk=int(raw.get("cohort_encounters_per_chunk", 300)),
         workers=int(raw.get("workers", 4)),
-        dashboards=tuple(raw.get("dashboards") or ("respiratory",)),
+        dashboards=tuple(raw.get("dashboards") or DEFAULT_DASHBOARDS),
     )

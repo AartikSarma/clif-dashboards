@@ -147,4 +147,4 @@ New modules have no upstream oracle. Each needs a small set of hand-built encoun
 
 ## Risks
 
-The `source_row` ordering invariant lives in `stage.py` and stays there; modules that take `first` values after merges inherit the same protection. The respiratory module must keep `phase_a` and `phase_b` chunk sizes configurable separately, as now. Site configs gain a `dashboards:` list; old configs without it should default to `[respiratory]` so the maintainer's existing site YAML keeps working.
+The `source_row` ordering invariant lives in `stage.py` and stays there; modules that take `first` values after merges inherit the same protection. The respiratory module must keep `phase_a` and `phase_b` chunk sizes configurable separately, as now. Site configs gain a `dashboards:` list; old configs without it defaulted to `[respiratory]` until 2026-10-27, and now default to every dashboard (respiratory, stewardship, microbiology).
