@@ -297,8 +297,73 @@ metrics:
         alternatives: []
         source: NHSN SAAR Guide, 2017/2018 baseline (adult)
 
+  anaerobic:
+    number: S9
+    domain: Anaerobic coverage
+    title: Anti-anaerobic agents
+    short: Anti-anaerobic agents
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Days of therapy with agents active against anaerobes, given in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: [metronidazole, clindamycin, piperacillin_tazobactam, ampicillin_sulbactam, amoxicillin_clavulanate,
+                ticarcillin_clavulanate, imipenem, imipenem_relebactam, meropenem, meropenem_vaborbactam, ertapenem,
+                doripenem, cefoxitin, cefotetan, cefmetazole, moxifloxacin, tigecycline, eravacycline]
+        display: Metronidazole, clindamycin, beta-lactam/beta-lactamase inhibitor combinations (piperacillin/tazobactam, ampicillin/sulbactam, amoxicillin/clavulanate, ticarcillin/clavulanate), carbapenems (imipenem, meropenem and their combinations, ertapenem, doripenem), cephamycins (cefoxitin, cefotetan, cefmetazole), moxifloxacin, tigecycline and eravacycline, by any counted route. NHSN has no anaerobic group, so this list is a local choice for your stewardship pharmacist to review
+        alternatives: [Metronidazole, piperacillin/tazobactam and carbapenems only]
+        source: Local choice; CDC "Avoid duplicative anaerobic coverage" (Be Antibiotics Aware) names piperacillin/tazobactam, metronidazole and the carbapenems
+      - id: iv_only
+        label: IV-only agents
+        value: []
+        display: None
+        alternatives: []
+        source: Local choice
+
+  redundant_anaerobic:
+    number: S10
+    domain: Anaerobic coverage
+    title: Days with duplicative anaerobic coverage
+    short: Duplicative anaerobic coverage
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Days on two or more anti-anaerobic agents, two days running
+    denominator: Days on any anti-anaerobic agent (S9 agents) in the ICU
+    decisions:
+      - id: agents
+        label: Agents
+        value: same as S9
+        display: The S9 agents
+        alternatives: []
+        source: Local choice
+      - id: excluded_from_count
+        label: Not counted toward two
+        value: ["metronidazole:enteral"]
+        display: Oral or enteral metronidazole does not count toward the two agents, because it treats C. difficile infection, which CDC lists as an exception
+        alternatives: [Count every route]
+        source: CDC "Avoid duplicative anaerobic coverage"; Huttner et al., J Antimicrob Chemother 2012
+      - id: consecutive_days
+        label: Two days running
+        value: 2
+        display: A day counts only when the patient also had two or more anti-anaerobic agents on the day before or the day after in the same unit, so switching from one agent to another on a single day is not counted
+        alternatives: [Any single day with two agents]
+        source: Local choice
+      - id: exceptions
+        label: Clinical exceptions
+        value: not_excluded
+        display: Necrotizing fasciitis and some biliary infections, which CDC also lists as exceptions, cannot be identified from these tables, so a site with many such patients will read higher
+        alternatives: []
+        source: CDC "Avoid duplicative anaerobic coverage"
+
 changelog:
   - date: 2026-10-20
     change: Initial definitions from the NHSN AU Option and the SAAR guide (2017/2018 baseline, adult groups)
   - date: 2026-10-26
     change: "Count only whole months inside the site's medication records and admissions: a site's first months can have ICU days with no administrations recorded yet, and the months after its last admission hold only long-staying patients"
+  - date: 2026-10-27
+    change: "Added S9, anti-anaerobic agents, and S10, days with duplicative anaerobic coverage"

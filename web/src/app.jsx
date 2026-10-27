@@ -550,6 +550,7 @@ const STEWARDSHIP_LIST = {
     ["dot_broad_hospital_onset", "Broad, hospital-onset"], ["dot_broad_community", "Broad, community"],
     ["dot_resistant_gram_positive", "Anti-MRSA"], ["dot_narrow_beta_lactam", "Narrow beta-lactam"],
     ["dot_cdi_risk", "C. difficile risk"], ["dot_antifungal_candidiasis", "Antifungal"],
+    ["dot_anaerobic", "Anti-anaerobic"], ["days_redundant_anaerobic", "Duplicative anaerobic days"],
   ],
   cell: (e, c) => e[c] ?? "—",
 };

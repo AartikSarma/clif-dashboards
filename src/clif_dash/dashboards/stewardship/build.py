@@ -27,7 +27,7 @@ TABLES = ("medication_admin_intermittent",)
 REQUIRED_TABLES = ("medication_admin_intermittent",)
 # Measures counted as days of therapy, each a column dot_<id>; their agents are in the decisions
 GROUPS = ("all_antibacterial", "broad_hospital_onset", "broad_community", "resistant_gram_positive",
-          "narrow_beta_lactam", "cdi_risk", "antifungal_candidiasis")
+          "narrow_beta_lactam", "cdi_risk", "antifungal_candidiasis", "anaerobic")
 DAY_KEY = ["encounter_block", "hospital", "unit", "day"]
 ONE_MICROSECOND = pd.Timedelta(microseconds=1)
 
@@ -201,6 +201,7 @@ def therapy_chunk(cfg: SiteConfig, chunk: int, statistics: dict) -> dict:
     doses = pd.DataFrame({
         "hospitalization_id": meds["hospitalization_id"],
         "agent": lower(meds["med_category"]),
+        "route": lower(meds["med_route_category"]).fillna(""),
         "iv": lower(meds["med_route_category"]).eq("iv").fillna(False).astype(bool),
         "admin_dttm": meds["admin_dttm"],
     }).merge(mapping, on="hospitalization_id")
@@ -218,9 +219,29 @@ def therapy_chunk(cfg: SiteConfig, chunk: int, statistics: dict) -> dict:
         counted = placed["agent"].isin(agents) & (~placed["agent"].isin(iv_only) | placed["iv"])
         dot = placed[counted].drop_duplicates(DAY_KEY + ["agent"]).groupby(DAY_KEY).size().rename(f"dot_{group}")
         per_day.append(dot)
+    per_day.append(redundant_anaerobic_days(placed, groups["anaerobic"][0], decisions))
     therapy = pd.concat(per_day, axis=1).fillna(0).astype(int).reset_index() if len(placed) else \
-        pd.DataFrame(columns=DAY_KEY + [f"dot_{g}" for g in GROUPS])
+        pd.DataFrame(columns=DAY_KEY + [f"dot_{g}" for g in GROUPS] + ["redundant_anaerobic"])
     return {"chunk": chunk, "therapy": therapy, "counts": counts}
+
+
+def redundant_anaerobic_days(placed: pd.DataFrame, anaerobic: set[str], decisions: dict) -> pd.Series:
+    """1 for each ICU day with two or more anti-anaerobic agents, when the unit's previous or next
+    day also had two or more; a switch from one agent to another on a single day does not count.
+
+    Agent-route pairs listed under excluded_from_count (oral metronidazole, which treats
+    C. difficile) do not count toward the two.
+    """
+    values = {d["id"]: d["value"] for d in decisions["metrics"]["redundant_anaerobic"]["decisions"]}
+    excluded = {tuple(pair.lower().split(":")) for pair in values["excluded_from_count"]}
+    kept = [(agent, route) not in excluded for agent, route in zip(placed["agent"], placed["route"])]
+    counted = placed[placed["agent"].isin(anaerobic) & np.array(kept, dtype=bool)]
+    agents = counted.drop_duplicates(DAY_KEY + ["agent"]).groupby(DAY_KEY).size().rename("agents").reset_index()
+    double = agents[agents["agents"] >= 2][DAY_KEY]
+    stay = ["encounter_block", "hospital", "unit"]
+    neighbours = pd.concat([double.assign(day=double["day"] + pd.Timedelta(days=shift)) for shift in (-1, 1)])
+    confirmed = double.merge(neighbours.drop_duplicates(), on=stay + ["day"])
+    return confirmed.drop_duplicates(DAY_KEY).set_index(DAY_KEY).assign(redundant_anaerobic=1)["redundant_anaerobic"]
 
 
 # --------------------------------------------------------------------------- #
@@ -261,12 +282,16 @@ def build(site: SiteBuild) -> BuildResult:
         if results else {"staged": 0, "administered": 0, "counted_route": 0, "in_icu": 0}
 
     days = days.merge(therapy, on=DAY_KEY, how="left")
-    days[dot_columns] = days[dot_columns].fillna(0).astype(int)
+    therapy_columns = dot_columns + ["redundant_anaerobic"]
+    days = days.reindex(columns=[*days.columns, *[c for c in therapy_columns if c not in days.columns]])
+    days[therapy_columns] = days[therapy_columns].fillna(0).astype(int)
     days["any_antibacterial"] = (days["dot_all_antibacterial"] > 0).astype(int)
+    days["any_anaerobic"] = (days["dot_anaerobic"] > 0).astype(int)
     days["month"] = days["day"].dt.strftime("%Y-%m")
     rows = days.groupby(["encounter_block", "hospital", "unit", "month"], sort=True).agg(
         first_day=("day", "min"), last_day=("day", "max"), days_present=("day", "size"),
-        days_any=("any_antibacterial", "sum"), **{c: (c, "sum") for c in dot_columns}).reset_index()
+        days_any=("any_antibacterial", "sum"), days_anaerobic=("any_anaerobic", "sum"),
+        days_redundant_anaerobic=("redundant_anaerobic", "sum"), **{c: (c, "sum") for c in dot_columns}).reset_index()
 
     encounter_index = encounters.set_index("encounter_block")
     blocks = rows["encounter_block"]
@@ -280,7 +305,8 @@ def build(site: SiteBuild) -> BuildResult:
     for column in ("first_day", "last_day"):
         rows[column] = rows[column].dt.strftime("%Y-%m-%d")
     rows = rows[["row_id", "encounter_block", "label_id", "month", "hospital", "unit", "sex", "race_eth", "age_band",
-                 "first_day", "last_day", "days_present", "days_any", *dot_columns]]
+                 "first_day", "last_day", "days_present", "days_any", "days_anaerobic", "days_redundant_anaerobic",
+                 *dot_columns]]
 
     funnel = [
         {"step": "Encounters after linking", "n": int(len(encounters))},

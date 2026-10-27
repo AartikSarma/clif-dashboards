@@ -23,6 +23,8 @@ METRICS = [
     *[Metric(group, "stay_months", "rate", f"dot_{group}", "days_present", "days present", scale=1000,
              missed=_used(f"dot_{group}"), missed_label=USED)
       for group in build.GROUPS if group != "all_antibacterial"],
+    Metric("redundant_anaerobic", "stay_months", "ratio", "days_redundant_anaerobic", "days_anaerobic",
+           "days on anti-anaerobic agents", missed=_used("days_redundant_anaerobic"), missed_label=USED),
 ]
 
 STEWARDSHIP = Dashboard(
@@ -35,7 +37,7 @@ STEWARDSHIP = Dashboard(
     data_quality=build.data_quality,
     row_tables=(STAY_MONTHS,),
     metrics=METRICS,
-    domains=["Overall use", "Agent groups (NHSN)"],
+    domains=["Overall use", "Agent groups (NHSN)", "Anaerobic coverage"],
     strata=[("unit", "ICU"), ("hospital", "Hospital"), ("sex", "Sex"), ("race_eth", "Race / ethnicity"),
             ("age_band", "Age band")],
     filters=(),
