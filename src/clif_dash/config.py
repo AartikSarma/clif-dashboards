@@ -9,7 +9,7 @@ import yaml
 
 PLATFORM_DECISIONS = "platform"
 # What a site config without a `dashboards:` list builds and serves
-DEFAULT_DASHBOARDS = ("respiratory", "stewardship", "microbiology", "fluids")
+DEFAULT_DASHBOARDS = ("respiratory", "stewardship", "microbiology", "fluids", "flow", "glycemic", "liberation", "kidney")
 # Decisions the code no longer reads; a site copy written before their removal may still list them
 RETIRED_DECISIONS = {"small_cell_n"}
 # Where the single decisions file lived before it was split into config/decisions/

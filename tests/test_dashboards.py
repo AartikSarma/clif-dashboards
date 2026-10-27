@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from clif_dash.build import build
-from clif_dash.dashboards import MICROBIOLOGY, RESPIRATORY, STEWARDSHIP
+from clif_dash.dashboards import FLOW, GLYCEMIC, KIDNEY, LIBERATION, MICROBIOLOGY, RESPIRATORY, STEWARDSHIP
 from clif_dash.server.app import create_app
 
 
@@ -133,11 +133,16 @@ def test_a_build_older_than_its_measures_is_refused(built, tmp_path):
 def test_every_measure_page_of_every_dashboard_answers(built):
     """Measures on secondary tables (antibiotic starts, isolates) included: each page has a funnel."""
     cfg, _, _ = built
-    build(cfg, STEWARDSHIP)
-    build(cfg, MICROBIOLOGY)
-    every = TestClient(create_app(cfg, [RESPIRATORY, STEWARDSHIP, MICROBIOLOGY]))
-    for dashboard in (RESPIRATORY, STEWARDSHIP, MICROBIOLOGY):
+    dashboards = [RESPIRATORY, STEWARDSHIP, MICROBIOLOGY, FLOW, GLYCEMIC, LIBERATION, KIDNEY]
+    for dashboard in dashboards[1:]:
+        build(cfg, dashboard)
+    every = TestClient(create_app(cfg, dashboards))
+    for dashboard in dashboards:
         for metric in dashboard.metrics:
             response = every.get(f"/api/{dashboard.id}/metric/{metric.id}")
             assert response.status_code == 200, (dashboard.id, metric.id)
             assert response.json()["funnel"], (dashboard.id, metric.id)
+            if dashboard is not RESPIRATORY:   # the synthetic data leaves proning empty
+                assert response.json()["agg"]["value"] is not None, (dashboard.id, metric.id)
+        for page in ("overview", "units", "quality", "rows"):
+            assert every.get(f"/api/{dashboard.id}/{page}").status_code == 200, (dashboard.id, page)

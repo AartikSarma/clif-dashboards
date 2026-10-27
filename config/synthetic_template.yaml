@@ -13,7 +13,7 @@ start_date:
 end_date:
 decisions_dir: decisions
 output_dir: ../output/synth_10k
-dashboards: [respiratory, stewardship, microbiology]
+dashboards: [respiratory, stewardship, microbiology, flow, glycemic, liberation, kidney]
 encounters_per_chunk: 2000
 cohort_encounters_per_chunk: 300
 workers: 4

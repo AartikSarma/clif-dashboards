@@ -23,7 +23,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from clif_dash.config import load_config  # noqa: E402
-from clif_dash.dashboards.fluids.build import shared_values, utc_timestamp, volume_limit_sql  # noqa: E402
+from clif_dash.dashboards.fluids.build import shared_values, volume_limit_sql  # noqa: E402
+from clif_dash.icu import utc_timestamp  # noqa: E402
 
 SMALL_CELL = 11
 

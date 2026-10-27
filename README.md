@@ -1,13 +1,17 @@
 # CLIF ICU Quality Dashboards
 
-ICU quality-improvement dashboards computed from a site's own [CLIF](https://clif-consortium.github.io/website/) database and served inside that site. Four dashboards ship today:
+ICU quality-improvement dashboards computed from a site's own [CLIF](https://clif-consortium.github.io/website/) database and served inside that site. Eight dashboards ship today:
 
 - **Respiratory failure**: lung-protective ventilation, proning, liberation, sedation and outcomes for adults on invasive mechanical ventilation.
 - **Antimicrobial stewardship**: NHSN-style days of therapy per 1,000 days present by ICU, for all antibacterials, the NHSN agent groups and anti-anaerobic agents, and duplicative anaerobic coverage.
 - **Microbiology**: blood and urine culture use, blood culture contamination, cultures before new antibiotics, hospital-onset bacteremia and C. difficile, and resistance in S. aureus and gram-negative isolates.
 - **Fluids**: input volume per ICU day by CLIF 3.0 input group (IV fluids, crystalloid, colloid, blood products, nutrition, medication fluids, renal replacement fluids, flushes), by ICU and month.
+- **ICU flow**: readmission within 48 h, night transfers out, ICU length of stay, time from ED arrival to ICU, and where ICU stays end, from ADT alone.
+- **Glycemic control**: ICU days with glucose below 40 and 70 mg/dL or above 300, days with a mean in range, hypoglycemia on insulin infusions, and insulin and glucose-monitoring days.
+- **ICU Liberation**: the ABCDEF bundle per ICU day: pain assessment, documented SAT and SBT, sedation assessment and depth, sedative and benzodiazepine infusions, and delirium screening and positivity.
+- **Kidney**: acute kidney injury arising in the ICU (KDIGO creatinine criteria), creatinine monitoring, CRRT days and CRRT effluent dose.
 
-The first three use CLIF 2.1 tables; fluids uses CLIF 3.0's `input` table and its categories. With no `dashboards:` line in the site config, the build makes every dashboard whose tables the site has and skips the rest.
+Fluids uses CLIF 3.0's `input` table and its categories; the others use CLIF 2.1 tables. fluids uses CLIF 3.0's `input` table and its categories. With no `dashboards:` line in the site config, the build makes every dashboard whose tables the site has and skips the rest.
 
 Everything runs on one machine inside your institution: a batch build reads your CLIF tables and writes the measures, and a local web server shows them. Nothing is sent anywhere. The build is designed for large sites; at UCSF it handles more than 80,000 ICU admissions.
 
@@ -41,6 +45,10 @@ The build reads parquet files named `<prefix><table>.parquet` (for example `clif
 | Antimicrobial stewardship | `medication_admin_intermittent` | |
 | Microbiology | `microbiology_culture` | `microbiology_susceptibility`, `microbiology_nonculture`, `medication_admin_intermittent` |
 | Fluids | `input` (CLIF 3.0: `recorded_dttm`, `input_category`, `input_group`, `input_volume`) | |
+| ICU flow | | |
+| Glycemic control | `labs` | `medication_admin_continuous` |
+| ICU Liberation | `patient_assessments` | `medication_admin_continuous`, `respiratory_support` |
+| Kidney | `labs` | `crrt_therapy`, `vitals` |
 
 A respiratory measure whose table is missing shows as unavailable. A missing required table stops the build with a message that names it.
 
@@ -153,7 +161,7 @@ With the synthetic data and `config/synth_10k.yaml` in place:
 uv run pytest
 ```
 
-The respiratory dashboard derives from an earlier single-file dashboard (see Credit), and the tests check it against that dashboard's own output on the v0.7.0 synthetic data: the cohort counts, every episode and proning row, the server's numbers (computed by the original JavaScript under Node), and 26 patient timelines. The stewardship dashboard has no such reference, so its tests build a small hand-made CLIF site whose counts were worked out by hand. Tests that need the synthetic data are skipped when it is missing.
+The respiratory dashboard derives from an earlier single-file dashboard (see Credit), and the tests check it against that dashboard's own output on the v0.7.0 synthetic data: the cohort counts, every episode and proning row, the server's numbers (computed by the original JavaScript under Node), and 26 patient timelines. The other dashboards have no such reference, so each one's tests build a small hand-made CLIF site whose counts were worked out by hand. Tests that need the synthetic data are skipped when it is missing.
 
 ## How it works
 
@@ -175,7 +183,7 @@ The build links hospitalizations into encounters across the site, then hands the
 
 - Only parquet tables are supported.
 - Each build recomputes every encounter; incremental refresh is not built yet.
-- The synthetic data has no documented SAT or SBT assessments, no paralytic infusions, one patient who meets the proning criteria, and four antibiotics. Those parts are checked only on paper or by hand-built tests until a site runs them on real data.
+- The synthetic data has no documented SAT or SBT assessments, no paralytic or benzodiazepine infusions, no CPOT or BPS pain scores, no point-of-care glucose and none below 40 or above 300 mg/dL, creatinine that varies at random from day to day (so AKI is far too common), one patient who meets the proning criteria, and four antibiotics. Those parts are checked only on paper or by hand-built tests until a site runs them on real data.
 - The stewardship measures follow NHSN's counting rules but are not SAARs: there are no NHSN predicted values, so compare within your site, not against national benchmarks.
 
 ## License and credit

@@ -1,17 +1,23 @@
 """ICU time shared by dashboards that count events per ICU day.
 
 Days present, placing a timed event (a dose, a culture) in the ICU stay that
-contains it, and the whole months a site's records cover. The stewardship and
-microbiology dashboards use these, so both count ICU days the same way.
+contains it, and the whole months a site's records cover. Every dashboard that
+counts per ICU day uses these, so all of them count ICU days the same way.
+
+Large tables (labs, assessments, infusions, input) are placed in DuckDB inside
+`icu_session`, so that only per-day summaries reach pandas.
 """
 from __future__ import annotations
+
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
 
+from . import stage
 from .config import SiteConfig
 from .dashboard import SiteBuild
-from .upstream import prep
+from .upstream import clif_io, prep
 
 DAY_KEY = ["encounter_block", "hospital", "unit", "day"]
 ONE_MICROSECOND = pd.Timedelta(microseconds=1)
@@ -137,3 +143,137 @@ def whole_months(first_record: str | None, last_record: str | None, first_admiss
     start = first if first.day == 1 else first + pd.offsets.MonthBegin(1)
     end = last if last.is_month_end else last.replace(day=1) - pd.Timedelta(days=1)
     return start, end
+
+
+# --------------------------------------------------------------------------- #
+# Placing large tables in DuckDB
+# --------------------------------------------------------------------------- #
+@contextmanager
+def icu_session(con, cfg: SiteConfig, intervals: pd.DataFrame, mapping: pd.DataFrame):
+    """Register the ICU rows and the encounter map, and group days in the site's zone.
+
+    Inside it, CAST(<timestamptz> AS DATE) is the local day, and the SQL from
+    `placed_sql` and `infusion_days_sql` can run.
+    """
+    con.register("icu_rows", intervals)
+    con.register("encounter_map", mapping[["hospitalization_id", "encounter_block"]])
+    con.execute(f"SET TimeZone = '{cfg.site_timezone}'")
+    try:
+        yield con
+    finally:
+        con.execute("SET TimeZone = 'UTC'")
+        con.unregister("icu_rows")
+        con.unregister("encounter_map")
+
+
+def utc_timestamp(con, source: str, column: str) -> str:
+    """SQL for a CLIF datetime column as a UTC timestamp with time zone, however the site stored it.
+
+    CLIF datetimes are UTC: a parquet timestamp without a zone is read as UTC, not as the
+    session's zone, and text is parsed with its offset.
+    """
+    name = column.split(".")[-1]
+    kind = con.execute(f"SELECT column_type FROM (DESCRIBE SELECT {name} FROM {source})").fetchone()[0].upper()
+    if "TIME ZONE" in kind:
+        return column
+    if kind.startswith("TIMESTAMP"):
+        return f"timezone('UTC', {column})"
+    return f"CAST({column} AS TIMESTAMPTZ)"
+
+
+def source_sql(cfg: SiteConfig, table: str) -> str:
+    """A CLIF table read with each row's position, which identifies it once joined."""
+    return f"read_parquet('{cfg.table_path(table)}', file_row_number = true)"
+
+
+def placed_sql(con, cfg: SiteConfig, table: str, time_column: str, columns: str, where: str = "TRUE") -> str:
+    """SQL for the rows of `table` (alias s) placed in the ICU row that contains them.
+
+    in <= time < out; a row in two overlapping ICU rows keeps the earlier one; rows
+    outside every ICU row are dropped. Gives encounter_block, hospital, unit, event_dttm,
+    the local `day`, and `columns` (SQL over s). Run inside `icu_session`.
+    """
+    source = source_sql(cfg, table)
+    time = utc_timestamp(con, source, f"s.{time_column}")
+    return f"""
+        SELECT i.encounter_block, i.hospital, i.unit, {time} AS event_dttm, CAST({time} AS DATE) AS day, {columns}
+        FROM {source} AS s
+        JOIN encounter_map AS m ON CAST(s.hospitalization_id AS VARCHAR) = CAST(m.hospitalization_id AS VARCHAR)
+        JOIN icu_rows AS i ON i.encounter_block = m.encounter_block AND i.in_dttm <= {time} AND {time} < i.out_dttm
+        WHERE s.{time_column} IS NOT NULL AND ({where})
+        QUALIFY row_number() OVER (PARTITION BY s.file_row_number ORDER BY i.in_dttm) = 1
+    """
+
+
+STOPPED_ACTIONS = ("stop", "stopped", "paused", "hold", "held")
+
+
+def infusion_runs_sql(con, cfg: SiteConfig, agents: dict[str, list[str]], last_hours: float = 6) -> str:
+    """SQL for the intervals in which each kind of continuous infusion runs, per encounter.
+
+    `agents` maps a kind (sedative, paralytic, insulin) to med_category values. A charted
+    dose > 0 runs until the next charted row for the same drug, or `last_hours` after the
+    last one; a stop, pause or hold, or an action group not_administered, is a dose of 0.
+    The respiratory dashboard's infusion intervals follow the same rule
+    (upstream prep.infusion_intervals). Gives encounter_block, kind, start_dttm, end_dttm.
+    """
+    source = source_sql(cfg, "medication_admin_continuous")
+    time = utc_timestamp(con, source, "s.admin_dttm")
+    kinds = " ".join(f"WHEN lower(CAST(s.med_category AS VARCHAR)) IN ({quoted(v)}) THEN '{k}'"
+                     for k, v in agents.items())
+    every = quoted([a for v in agents.values() for a in v])
+    columns = set(stage.source_columns(cfg, "medication_admin_continuous"))
+    stops = [f"lower(CAST(s.mar_action_category AS VARCHAR)) IN ({quoted(STOPPED_ACTIONS)})"
+             if "mar_action_category" in columns else None,
+             "lower(CAST(s.mar_action_group AS VARCHAR)) = 'not_administered'" if "mar_action_group" in columns else None]
+    stopped = " OR ".join(c for c in stops if c) or "FALSE"
+    return f"""
+        SELECT encounter_block, kind, start_dttm, end_dttm FROM (
+            SELECT m.encounter_block, CASE {kinds} END AS kind, {time} AS start_dttm,
+                   coalesce(lead({time}) OVER (PARTITION BY m.encounter_block, lower(CAST(s.med_category AS VARCHAR))
+                                               ORDER BY {time}, s.file_row_number),
+                            {time} + INTERVAL {int(last_hours * 60)} MINUTE) AS end_dttm,
+                   CASE WHEN coalesce({stopped}, FALSE) THEN 0
+                        ELSE coalesce(TRY_CAST(s.med_dose AS DOUBLE), 0) END AS dose
+            FROM {source} AS s
+            JOIN encounter_map AS m ON CAST(s.hospitalization_id AS VARCHAR) = CAST(m.hospitalization_id AS VARCHAR)
+            WHERE s.admin_dttm IS NOT NULL AND lower(CAST(s.med_category AS VARCHAR)) IN ({every})
+        ) WHERE dose > 0 AND end_dttm > start_dttm
+    """
+
+
+def interval_days_sql(intervals: str) -> str:
+    """SQL for the local ICU days each interval touches, per kind (DAY_KEY + kind).
+
+    `intervals` is SQL giving encounter_block, kind, start_dttm, end_dttm; each is clipped
+    to the ICU rows it overlaps. Run inside `icu_session`.
+    """
+    return f"""
+        SELECT DISTINCT encounter_block, hospital, unit, CAST(day AS DATE) AS day, kind FROM (
+            SELECT r.encounter_block, i.hospital, i.unit, r.kind,
+                   unnest(generate_series(CAST(CAST(greatest(r.start_dttm, i.in_dttm) AS DATE) AS TIMESTAMP),
+                                          CAST(CAST(least(r.end_dttm, i.out_dttm) - INTERVAL 1 MICROSECOND AS DATE)
+                                               AS TIMESTAMP),
+                                          INTERVAL 1 DAY)) AS day
+            FROM ({intervals}) AS r
+            JOIN icu_rows AS i ON i.encounter_block = r.encounter_block
+                 AND r.start_dttm < i.out_dttm AND r.end_dttm > i.in_dttm
+        )
+    """
+
+
+def quoted(values) -> str:
+    """Lower-cased SQL string literals, for an IN list."""
+    return ", ".join("'" + str(v).lower().replace("'", "''") + "'" for v in values) or "NULL"
+
+
+def outlier_bounds(table: str, value_column: str, category: str) -> tuple[float, float]:
+    """clifpy's plausible range for one category's values (the platform's outliers decision)."""
+    rule = clif_io.outlier_config().get(table, {}).get(value_column, {}).get(category, {})
+    return float(rule.get("min", -np.inf)), float(rule.get("max", np.inf))
+
+
+def frame_days(frame: pd.DataFrame) -> pd.DataFrame:
+    """A DuckDB result's `day` column as a pandas timestamp, matching `days_present`."""
+    frame["day"] = pd.to_datetime(frame["day"])
+    return frame

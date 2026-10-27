@@ -13,7 +13,8 @@ import pandas as pd
 
 from ...config import SiteConfig
 from ...dashboard import BuildResult, SiteBuild, log
-from ...icu import DAY_KEY, icu_intervals, icu_time_per_day, in_window, utc_text, whole_months
+from ...icu import (DAY_KEY, frame_days, icu_intervals, icu_session, icu_time_per_day, in_window, placed_sql,
+                    utc_text, whole_months)
 from ...upstream import prep
 
 TABLES = ("input",)
@@ -72,21 +73,6 @@ def data_quality(con, cfg: SiteConfig) -> dict:
     }
 
 
-def utc_timestamp(con, source: str, column: str) -> str:
-    """SQL for a CLIF datetime column as a UTC timestamp with time zone, however the site stored it.
-
-    CLIF datetimes are UTC: a parquet timestamp without a zone is read as UTC, not as the
-    session's zone, and text is parsed with its offset.
-    """
-    name = column.split(".")[-1]
-    kind = con.execute(f"SELECT column_type FROM (DESCRIBE SELECT {name} FROM {source})").fetchone()[0].upper()
-    if "TIME ZONE" in kind:
-        return column
-    if kind.startswith("TIMESTAMP"):
-        return f"timezone('UTC', {column})"
-    return f"CAST({column} AS TIMESTAMPTZ)"
-
-
 def daily_volumes(con, cfg: SiteConfig, intervals: pd.DataFrame, mapping: pd.DataFrame,
                   limits: dict | None) -> pd.DataFrame:
     """mL per encounter, unit, local day and input category, for volumes recorded in an ICU.
@@ -94,35 +80,16 @@ def daily_volumes(con, cfg: SiteConfig, intervals: pd.DataFrame, mapping: pd.Dat
     A volume in two overlapping ICU rows counts once, in the earlier one; a volume above
     its group's limit (volume_limits) does not count.
     """
-    source = f"read_parquet('{cfg.table_path('input')}', file_row_number = true)"
-    recorded = utc_timestamp(con, source, "s.recorded_dttm")
-    con.register("icu_rows", intervals)
-    con.register("encounter_map", mapping[["hospitalization_id", "encounter_block"]])
-    con.execute(f"SET TimeZone = '{cfg.site_timezone}'")
-    try:
+    with icu_session(con, cfg, intervals, mapping):
+        placed = placed_sql(con, cfg, "input", "recorded_dttm",
+                            "s.input_volume, lower(CAST(s.input_group AS VARCHAR)) AS input_group, "
+                            "lower(CAST(s.input_category AS VARCHAR)) AS input_category",
+                            where=f"s.input_volume > 0 AND s.input_volume <= {volume_limit_sql(limits, 's.input_group')}")
         frame = con.execute(f"""
-            WITH placed AS (
-                SELECT i.encounter_block, i.hospital, i.unit, {recorded} AS recorded_dttm, s.input_volume,
-                       lower(CAST(s.input_group AS VARCHAR)) AS input_group,
-                       lower(CAST(s.input_category AS VARCHAR)) AS input_category
-                FROM {source} AS s
-                JOIN encounter_map AS m ON CAST(s.hospitalization_id AS VARCHAR) = m.hospitalization_id
-                JOIN icu_rows AS i ON i.encounter_block = m.encounter_block
-                     AND i.in_dttm <= {recorded} AND {recorded} < i.out_dttm
-                WHERE s.input_volume > 0 AND s.recorded_dttm IS NOT NULL
-                      AND s.input_volume <= {volume_limit_sql(limits, "s.input_group")}
-                QUALIFY row_number() OVER (PARTITION BY s.file_row_number ORDER BY i.in_dttm) = 1
-            )
-            SELECT encounter_block, hospital, unit, CAST(recorded_dttm AS DATE) AS day,
-                   input_group, input_category, sum(input_volume) AS volume
-            FROM placed GROUP BY ALL
+            SELECT encounter_block, hospital, unit, day, input_group, input_category, sum(input_volume) AS volume
+            FROM ({placed}) GROUP BY ALL
         """).df()
-    finally:
-        con.execute("SET TimeZone = 'UTC'")
-        con.unregister("icu_rows")
-        con.unregister("encounter_map")
-    frame["day"] = pd.to_datetime(frame["day"])
-    return frame
+    return frame_days(frame)
 
 
 def build(site: SiteBuild) -> BuildResult:

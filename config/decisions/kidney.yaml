@@ -1,0 +1,190 @@
+# =============================================================================
+# Kidney dashboard: decision log
+# =============================================================================
+# Every analytic choice the kidney dashboard makes is read from this file and
+# from platform.yaml, whose site-wide choices come first under `shared:`.
+# Change a `value`, rebuild (`uv run clif-dash build`), and both the numbers and
+# each measure's "How this is calculated" panel update.
+#
+# Acute kidney injury uses the KDIGO 2012 creatinine criteria only. Urine
+# output (CLIF 3.0's output table) and the start of kidney replacement therapy
+# are not used, so AKI is undercounted, most in oliguric patients. The baseline
+# is the lowest creatinine in the 7 days before each result, as electronic AKI
+# alerts do (the NHS England algorithm uses the same window), so AKI present
+# before admission without an earlier result is found only by a later rise.
+#
+# CLIF 2.1's crrt_therapy records delivered flow rates but no prescribed dose,
+# so the dose measure compares delivered effluent with the KDIGO target.
+# Record why you changed a default under `changelog`.
+# =============================================================================
+
+version: 1
+
+shared:
+  - id: icu_locations
+    label: Locations
+    value: icu
+    display: ADT rows with location_category icu; the unit is the location_type (e.g. Medical ICU), as on the other dashboards
+    alternatives: [All inpatient locations]
+    source: Dashboard scope (ICU quality)
+
+  - id: days_present
+    label: Days present
+    value: calendar_days_touched
+    display: Each local calendar day on which the patient spent any time in the unit counts as one day, as on the stewardship and microbiology dashboards
+    alternatives: [Midnight census]
+    source: NHSN AU Option (days present)
+
+  - id: creatinine_time
+    label: Creatinine time
+    value: lab_collect_dttm
+    display: "labs rows with lab_category creatinine, in mg/dL, above 0 and within clifpy's range (to 20), timed by sample collection"
+    alternatives: [lab_result_dttm]
+    source: CLIF labs mCIDE
+
+  - id: creatinine_coverage
+    label: Months counted
+    value: whole_months
+    display: "Only whole months inside both the site's creatinine results (first to last) and its admissions, as on the other per-day dashboards"
+    alternatives: [all (every month with ICU days)]
+    source: Local choice
+
+  - id: control_limits
+    label: Control limits
+    value: none
+    display: Not drawn. ICU days cluster within patients, which would make limits falsely narrow
+    alternatives: []
+    source: Local choice
+
+metrics:
+  aki_icu_onset:
+    number: K1
+    domain: Acute kidney injury
+    title: Acute kidney injury arising in the ICU
+    short: AKI in the ICU
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Encounters whose first creatinine meeting KDIGO stage 1 was collected in an ICU on ICU day 3 or later
+    denominator: Days present
+    decisions:
+      - id: absolute_rise
+        label: Absolute rise
+        value: 0.3
+        display: A rise of 0.3 mg/dL or more above the lowest result in the preceding 48 h
+        alternatives: []
+        source: KDIGO 2012 stage 1
+      - id: absolute_rise_hours
+        label: Absolute-rise window
+        value: 48
+        display: 48 h
+        alternatives: []
+        source: KDIGO 2012
+      - id: relative_rise
+        label: Relative rise
+        value: 1.5
+        display: A result 1.5 times or more the lowest result in the preceding 7 days
+        alternatives: []
+        source: KDIGO 2012 stage 1
+      - id: baseline_days
+        label: Baseline
+        value: 7
+        display: The lowest creatinine in the 7 days before each result, in the same encounter, including results before the ICU
+        alternatives: [Lowest result in the year before admission (not in CLIF encounters)]
+        source: KDIGO 2012; NHS England AKI algorithm
+      - id: stage2_relative_rise
+        label: Stage 2
+        value: 2.0
+        display: 2.0 times the 7-day baseline or more
+        alternatives: []
+        source: KDIGO 2012
+      - id: stage3_relative_rise
+        label: Stage 3
+        value: 3.0
+        display: 3.0 times the 7-day baseline or more
+        alternatives: []
+        source: KDIGO 2012
+      - id: stage3_value
+        label: Stage 3 by value
+        value: 4.0
+        display: A result of 4.0 mg/dL or more that also meets stage 1
+        alternatives: []
+        source: KDIGO 2012
+      - id: onset_icu_day
+        label: Arising in the ICU
+        value: 3
+        display: "Each encounter's first AKI counts once, when it is collected in an ICU on ICU day 3 or later, day 1 being the calendar day of the encounter's first ICU admission. AKI found earlier, in the ICU or before it, makes the encounter never count, even if it recovers and recurs"
+        alternatives: [Any onset in the ICU]
+        source: Same convention as NHSN hospital-onset events and the microbiology dashboard
+
+  severe_aki_icu_onset:
+    number: K2
+    domain: Acute kidney injury
+    title: Stage 2 or 3 acute kidney injury arising in the ICU
+    short: Stage 2–3 AKI in the ICU
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Encounters whose first creatinine meeting KDIGO stage 2 or 3 was collected in an ICU on ICU day 3 or later
+    denominator: Days present
+    decisions:
+      - id: stages
+        label: Stages
+        value: [2, 3]
+        display: The stage 2 and 3 criteria and the ICU-day rule under K1
+        alternatives: []
+        source: KDIGO 2012
+
+  creatinine_measured:
+    number: K3
+    domain: Acute kidney injury
+    title: ICU days with a creatinine result
+    short: Creatinine measured
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: ICU days with at least one creatinine collected in the ICU
+    denominator: Days present
+    decisions: []
+
+  crrt_use:
+    number: K4
+    domain: CRRT
+    title: ICU days on CRRT
+    short: CRRT days
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: ICU days with a crrt_therapy row recorded in the ICU
+    denominator: Days present
+    decisions: []
+
+  crrt_dose:
+    number: K5
+    domain: CRRT
+    title: CRRT days at the KDIGO effluent dose
+    short: CRRT dose ≥ 20
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: CRRT days with a mean effluent dose of 20 mL/kg/h or more
+    denominator: CRRT days with flow rates and a weight
+    decisions:
+      - id: target
+        label: Target
+        value: 20
+        display: 20 mL/kg/h or more
+        alternatives: [25 mL/kg/h]
+        source: KDIGO 2012 (deliver 20–25 mL/kg/h)
+      - id: effluent
+        label: Effluent dose
+        value: summed_flows_per_weight
+        display: "Each crrt_therapy row's pre- and post-filter replacement, dialysate and net ultrafiltration rates added together (each within clifpy's range, a missing rate as 0), averaged over the day's rows, divided by the encounter's median recorded weight (vitals weight_kg)"
+        alternatives: [Weight at ICU admission]
+        source: KDIGO 2012; local choice
+
+changelog:
+  - date: 2026-10-27
+    change: Initial definitions

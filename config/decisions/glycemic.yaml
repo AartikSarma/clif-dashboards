@@ -1,0 +1,198 @@
+# =============================================================================
+# Glycemic control dashboard: decision log
+# =============================================================================
+# Every analytic choice the glycemic dashboard makes is read from this file and
+# from platform.yaml, whose site-wide choices come first under `shared:`.
+# Change a `value`, rebuild (`uv run clif-dash build`), and both the numbers and
+# each measure's "How this is calculated" panel update.
+#
+# The unit is the patient-day, as the Society of Hospital Medicine's glycemic
+# control metrics recommend: an ICU day counts once, however many glucose
+# results it has. The hypo- and hyperglycemia thresholds are those of the CMS
+# Hospital Harm eCQMs, but the measures are simpler than those eCQMs, which
+# also require an antidiabetic drug in the preceding 24 h (hypoglycemia) or
+# repeated high values (hyperglycemia) and count per hospital day; the
+# dashboards are for comparison within a site, not for reporting.
+#
+# Glucose is in mg/dL. A site that stores mmol/L must convert before building;
+# the data-quality page lists glucose rows by reference_unit.
+# Record why you changed a default under `changelog`.
+# =============================================================================
+
+version: 1
+
+shared:
+  - id: icu_locations
+    label: Locations
+    value: icu
+    display: ADT rows with location_category icu; the unit is the location_type (e.g. Medical ICU), as on the other dashboards
+    alternatives: [All inpatient locations]
+    source: Dashboard scope (ICU quality)
+
+  - id: days_present
+    label: Days present
+    value: calendar_days_touched
+    display: Each local calendar day on which the patient spent any time in the unit counts as one day, as on the stewardship and microbiology dashboards
+    alternatives: [Midnight census]
+    source: NHSN AU Option (days present)
+
+  - id: glucose_categories
+    label: Glucose results
+    value: [glucose_serum, glucose_fingerstick]
+    display: "labs rows with lab_category glucose_serum or glucose_fingerstick (point-of-care), in mg/dL, within clifpy's plausible range (0 to 2,000)"
+    alternatives: [Point-of-care only, Serum only]
+    source: CLIF labs mCIDE
+
+  - id: glucose_time
+    label: Glucose time
+    value: lab_collect_dttm
+    display: The time the sample was collected, which places a result in an ICU and a day
+    alternatives: [lab_result_dttm]
+    source: Local choice
+
+  - id: glucose_location
+    label: Where a result counts
+    value: location_at_collection
+    display: The ICU whose ADT row contains the collection time (in ≤ time < out); results collected outside an ICU are not counted
+    alternatives: []
+    source: Local choice
+
+  - id: insulin_agents
+    label: Insulin infusions
+    value: [insulin]
+    display: medication_admin_continuous rows with med_category insulin. An infusion runs from each charted dose above 0 until the next charted row for it, or 6 h after the last; stop, pause and hold rows end it. A day counts when an infusion ran in the ICU at any time that day
+    alternatives: []
+    source: Same rule as the respiratory dashboard's infusion intervals
+
+  - id: glucose_coverage
+    label: Months counted
+    value: whole_months
+    display: "Only whole months inside both the site's glucose results (first to last) and its admissions, as on the stewardship and microbiology dashboards"
+    alternatives: [all (every month with ICU days)]
+    source: Local choice
+
+  - id: control_limits
+    label: Control limits
+    value: none
+    display: Not drawn. ICU days cluster within patients, which would make limits falsely narrow
+    alternatives: []
+    source: Local choice
+
+metrics:
+  severe_hypoglycemia:
+    number: G1
+    domain: Hypoglycemia
+    title: Severe hypoglycemia (glucose < 40 mg/dL)
+    short: Glucose < 40
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: ICU days with any glucose below 40 mg/dL
+    denominator: ICU days with a glucose result
+    decisions:
+      - id: threshold
+        label: Threshold
+        value: 40
+        display: Below 40 mg/dL
+        alternatives: [Below 54 mg/dL (level 2)]
+        source: CMS Hospital Harm – Severe Hypoglycemia eCQM threshold (simplified, see the file header)
+
+  hypoglycemia:
+    number: G2
+    domain: Hypoglycemia
+    title: Hypoglycemia (glucose < 70 mg/dL)
+    short: Glucose < 70
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: ICU days with any glucose below 70 mg/dL
+    denominator: ICU days with a glucose result
+    decisions:
+      - id: threshold
+        label: Threshold
+        value: 70
+        display: Below 70 mg/dL
+        alternatives: []
+        source: American Diabetes Association level 1 hypoglycemia
+
+  hypoglycemia_on_insulin:
+    number: G3
+    domain: Hypoglycemia
+    title: Hypoglycemia on an insulin infusion
+    short: < 70 on insulin
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Insulin infusion days with any glucose below 70 mg/dL
+    denominator: ICU days on which an insulin infusion ran and glucose was measured
+    decisions:
+      - id: threshold
+        label: Threshold
+        value: 70
+        display: Below 70 mg/dL at any time that day, during the infusion or not
+        alternatives: []
+        source: American Diabetes Association level 1 hypoglycemia
+
+  severe_hyperglycemia:
+    number: G4
+    domain: Hyperglycemia
+    title: Severe hyperglycemia (glucose > 300 mg/dL)
+    short: Glucose > 300
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: ICU days with any glucose above 300 mg/dL
+    denominator: ICU days with a glucose result
+    decisions:
+      - id: threshold
+        label: Threshold
+        value: 300
+        display: Above 300 mg/dL
+        alternatives: []
+        source: CMS Hospital Harm – Severe Hyperglycemia eCQM threshold (simplified, see the file header)
+
+  glucose_in_range:
+    number: G5
+    domain: Hyperglycemia
+    title: ICU days with mean glucose 70–180 mg/dL
+    short: Mean glucose in range
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: ICU days whose mean glucose is from 70 to 180 mg/dL
+    denominator: ICU days with a glucose result
+    decisions:
+      - id: threshold
+        label: Range
+        value: [70, 180]
+        display: Mean of the day's results from 70 to 180 mg/dL inclusive
+        alternatives: [140–180 mg/dL]
+        source: NICE-SUGAR; ADA Standards of Care (140–180 mg/dL for most critically ill patients); SHM patient-day mean
+
+  insulin_infusion:
+    number: G6
+    domain: Insulin and monitoring
+    title: ICU days on an insulin infusion
+    short: Insulin infusion days
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: ICU days on which an insulin infusion ran
+    denominator: Days present
+    decisions: []
+
+  glucose_measured:
+    number: G7
+    domain: Insulin and monitoring
+    title: ICU days with a glucose result
+    short: Glucose measured
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: ICU days with at least one glucose result
+    denominator: Days present
+    decisions: []
+
+changelog:
+  - date: 2026-10-27
+    change: Initial definitions

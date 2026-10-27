@@ -1,0 +1,171 @@
+# =============================================================================
+# ICU flow dashboard: decision log
+# =============================================================================
+# Every analytic choice the flow dashboard makes is read from this file and
+# from platform.yaml, whose site-wide choices come first under `shared:`.
+# Change a `value`, rebuild (`uv run clif-dash build`), and both the numbers and
+# each measure's "How this is calculated" panel update.
+#
+# The measures read only ADT and hospitalization. One row is one adult
+# encounter with ICU time, attributed to its first ICU row: that unit, that
+# hospital, and the month of ICU admission. Readmission and ICU length of stay
+# follow the respiratory dashboard's rules, applied to every ICU encounter.
+# Record why you changed a default under `changelog`.
+# =============================================================================
+
+version: 1
+
+shared:
+  - id: icu_locations
+    label: Locations
+    value: icu
+    display: ADT rows with location_category icu; the unit is the location_type (e.g. Medical ICU), as on the other dashboards
+    alternatives: [All inpatient locations]
+    source: Dashboard scope (ICU quality)
+
+  - id: ed_locations
+    label: Emergency department
+    value: ed
+    display: ADT rows with location_category ed
+    alternatives: []
+    source: CLIF location_category
+
+  - id: attribution
+    label: Attribution
+    value: first_icu_row
+    display: Each encounter counts once, in the unit, hospital and month (site time) of its first ICU ADT row
+    alternatives: [Each ICU stay separately]
+    source: Local choice
+
+  - id: icu_coverage
+    label: Months counted
+    value: whole_months
+    display: "Only whole months inside both the site's ICU ADT rows (first to last ICU admission) and its admissions. In the last months, stays still open at the end of the extract are cut short, so length of stay reads falsely short and readmissions are missed"
+    alternatives: [all (every month with an ICU admission)]
+    source: Local choice
+
+  - id: control_limits
+    label: Control limits
+    value: p_chart_on_encounters
+    display: 3-sigma p-chart limits on the proportions, whose denominators (encounters, transfers out) are one per encounter. None on the medians
+    alternatives: [None]
+    source: Local choice
+
+metrics:
+  icu_readmit_48h:
+    number: W1
+    domain: Transfers out
+    title: ICU readmission within 48 h of transfer out
+    short: Readmitted ≤ 48 h
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Encounters returning to an ICU within 48 h of their first transfer out
+    denominator: ICU encounters transferred out of the ICU to a non-ICU location (alive, before discharge)
+    decisions:
+      - id: readmit_hours
+        label: Window
+        value: 48
+        display: A return to any ICU within 48 h of the first transfer out of an ICU
+        alternatives: [72 h]
+        source: Same rule as the respiratory dashboard (icu_readmit)
+      - id: transfer_out
+        label: Transfer out
+        value: icu_then_non_icu_row
+        display: An ICU ADT row followed by a non-ICU row; its time is the ICU row's out time, or the next row's in time when out is missing. Only the encounter's first transfer out counts
+        alternatives: [Every transfer out]
+        source: Same rule as the respiratory dashboard
+
+  night_transfer_out:
+    number: W2
+    domain: Transfers out
+    title: Transfers out of the ICU at night
+    short: Night transfer out
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: First transfers out of the ICU between 22:00 and 07:00 (site time)
+    denominator: ICU encounters transferred out of the ICU alive
+    decisions:
+      - id: start_hour
+        label: Night starts
+        value: 22
+        display: "22:00"
+        alternatives: ["19:00", "21:00"]
+        source: After-hours ICU discharge studies use windows starting between 19:00 and 22:00
+      - id: end_hour
+        label: Night ends
+        value: 7
+        display: "07:00"
+        alternatives: ["08:00"]
+        source: After-hours ICU discharge studies
+
+  icu_los:
+    number: W3
+    domain: Time
+    title: ICU length of stay
+    short: ICU days
+    unit: days
+    direction: neutral
+    target: null
+    numerator: Days in an ICU per encounter, every ICU ADT row added together
+    denominator: ICU encounters
+    decisions:
+      - id: icu_los
+        label: ICU days
+        value: sum_icu_rows
+        display: Sum of the encounter's ICU ADT rows (out − in); a row with no out time ends at discharge. A readmission's days are included
+        alternatives: [First ICU stay only]
+        source: Same rule as the respiratory dashboard (icu_los)
+
+  ed_to_icu_hours:
+    number: W4
+    domain: Time
+    title: Time from ED arrival to ICU admission
+    short: ED to ICU
+    unit: hours
+    direction: lower
+    target: null
+    numerator: Hours from the start of the ED stay to the first ICU row
+    denominator: ICU encounters whose first ICU row directly follows ED rows
+    decisions:
+      - id: ed_start
+        label: ED arrival
+        value: first_ed_row_before_icu
+        display: In time of the first of the ED rows immediately before the first ICU row. Encounters reaching the ICU through a ward, the OR or another hospital are left out. The time includes evaluation in the ED as well as waiting for an ICU bed
+        alternatives: [Time of the ICU bed request (not in CLIF)]
+        source: Local choice
+
+  died_in_icu:
+    number: W5
+    domain: Where ICU stays end
+    title: Died in the ICU
+    short: Died in ICU
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Encounters discharged dead whose last ADT row is an ICU
+    denominator: ICU encounters
+    decisions:
+      - id: death
+        label: Death
+        value: [Expired]
+        display: discharge_category Expired (compared case-insensitively). Not risk-adjusted, so differences between units reflect case mix as much as care
+        alternatives: [Add hospice]
+        source: CLIF discharge_category
+
+  discharged_from_icu:
+    number: W6
+    domain: Where ICU stays end
+    title: Discharged from the hospital directly from the ICU
+    short: Discharged from ICU
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: Encounters discharged alive whose last ADT row is an ICU (home, another hospital, hospice or a facility)
+    denominator: ICU encounters
+    decisions: []
+
+changelog:
+  - date: 2026-10-27
+    change: Initial definitions

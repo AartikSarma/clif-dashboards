@@ -1,0 +1,278 @@
+# =============================================================================
+# ICU Liberation dashboard: decision log
+# =============================================================================
+# Every analytic choice the liberation dashboard makes is read from this file
+# and from platform.yaml, whose site-wide choices come first under `shared:`.
+# Change a `value`, rebuild (`uv run clif-dash build`), and both the numbers and
+# each measure's "How this is calculated" panel update.
+#
+# The measures follow the SCCM ICU Liberation (ABCDEF) bundle and the 2018
+# PADIS guideline, per ICU day: A, assess pain; B, spontaneous awakening and
+# breathing trials; C, choice of sedation and its depth; D, delirium. E (early
+# mobility) and F (family engagement) have no CLIF 2.1 source.
+#
+# SAT and SBT here are documented trials only. The respiratory dashboard also
+# counts trials found from the EHR on its own vent-days, with readiness
+# criteria and a comfort-care exclusion, so its SAT and SBT figures differ.
+# Record why you changed a default under `changelog`.
+# =============================================================================
+
+version: 1
+
+shared:
+  - id: icu_locations
+    label: Locations
+    value: icu
+    display: ADT rows with location_category icu; the unit is the location_type (e.g. Medical ICU), as on the other dashboards
+    alternatives: [All inpatient locations]
+    source: Dashboard scope (ICU quality)
+
+  - id: days_present
+    label: Days present
+    value: calendar_days_touched
+    display: Each local calendar day on which the patient spent any time in the unit counts as one day, as on the stewardship and microbiology dashboards. An assessment counts on the day and in the ICU of its recorded time
+    alternatives: [Midnight census]
+    source: NHSN AU Option (days present)
+
+  - id: rass_categories
+    label: Sedation scale
+    value: [RASS]
+    display: patient_assessments rows with assessment_category RASS and a numerical value from −5 to +4 (clifpy's range)
+    alternatives: [Add SAS]
+    source: CLIF patient_assessments mCIDE
+
+  - id: cam_categories
+    label: Delirium screen
+    value: [cam_total]
+    display: "patient_assessments rows with assessment_category cam_total. Positive: categorical value positive, or a numerical value of 1 when there is no categorical value. Negative: negative, or 0. Unable to assess counts as a screen but not as a result"
+    alternatives: [Add ICDSC (icsdc_total ≥ 4)]
+    source: CLIF patient_assessments mCIDE; CAM-ICU
+
+  - id: not_done_values
+    label: Trials not done
+    value: ["no", not performed, not done, "false"]
+    display: A documented SAT or SBT row whose categorical value is one of these, or whose numerical value is 0 with no categorical value, records a trial not done and does not count
+    alternatives: []
+    source: Local choice
+
+  - id: sedatives
+    label: Continuous sedatives
+    value: [propofol, midazolam, lorazepam, dexmedetomidine, ketamine]
+    display: Propofol, midazolam, lorazepam, dexmedetomidine and ketamine infusions (opioid-only infusions are not sedatives here), as on the respiratory dashboard's SAT
+    alternatives: [Include opioid infusions]
+    source: Same list as the respiratory dashboard (sat.sedatives)
+
+  - id: benzodiazepines
+    label: Benzodiazepine infusions
+    value: [midazolam, lorazepam]
+    display: Midazolam and lorazepam infusions
+    alternatives: []
+    source: PADIS 2018 (propofol or dexmedetomidine over benzodiazepines)
+
+  - id: paralytics
+    label: Paralytic infusions
+    value: [cisatracurium, rocuronium, vecuronium, atracurium, pancuronium, succinylcholine]
+    display: Continuous infusions of cisatracurium, rocuronium, vecuronium, atracurium, pancuronium or succinylcholine, as on the respiratory dashboard
+    alternatives: []
+    source: Same list as the respiratory dashboard (upstream prep.PARALYTIC_CATS)
+
+  - id: infusion_running
+    label: Infusion running
+    value: next_charted_row
+    display: An infusion runs from each charted dose above 0 until the next charted row for the same drug, or 6 h after the last; stop, pause and hold rows end it. A day counts when an infusion ran in the ICU at any time that day
+    alternatives: []
+    source: Same rule as the respiratory dashboard's infusion intervals
+
+  - id: imv_devices
+    label: Invasive ventilation
+    value: [imv]
+    display: A day counts as on invasive ventilation when any respiratory_support row recorded in the ICU that day has device_category IMV. The respiratory dashboard's waterfall, which fills hours between rows, is not used here, so a day with no charted row is missed
+    alternatives: [Respiratory dashboard vent-days (≥ 6 h of IMV)]
+    source: Local choice
+
+  - id: assessment_coverage
+    label: Months counted
+    value: whole_months
+    display: "Only whole months inside both the site's RASS, CAM-ICU and pain assessments (first to last) and its admissions, as on the other per-day dashboards"
+    alternatives: [all (every month with ICU days)]
+    source: Local choice
+
+  - id: control_limits
+    label: Control limits
+    value: none
+    display: Not drawn. ICU days and RASS readings cluster within patients, which would make limits falsely narrow
+    alternatives: []
+    source: Local choice
+
+metrics:
+  pain_assessed:
+    number: L1
+    domain: "A: Pain"
+    title: ICU days with a pain assessment
+    short: Pain assessed
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: ICU days with at least one pain score
+    denominator: Days present
+    decisions:
+      - id: pain_categories
+        label: Pain scales
+        value: [NRS, VAS, cpot_total, BPS, PAINAD, NVPS, DVPRS]
+        display: "Any patient_assessments row with a value in NRS, VAS, CPOT (cpot_total), BPS, PAINAD, NVPS or DVPRS. PADIS recommends assessing pain routinely, with a self-report scale when the patient can and CPOT or BPS when not"
+        alternatives: [Require ≥ 4 assessments a day]
+        source: PADIS 2018; CLIF patient_assessments mCIDE
+
+  sat:
+    number: L2
+    domain: "B: Awakening and breathing trials"
+    title: Documented spontaneous awakening trial on eligible days
+    short: SAT documented
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: Eligible days with a documented SAT
+    denominator: ICU days on invasive ventilation with a continuous sedative running and no paralytic infusion
+    decisions:
+      - id: documented
+        label: Documented SAT
+        value: [sat_delivery_pass_fail, sat_delivery_performed]
+        display: A sat_delivery_pass_fail row (pass or fail, a trial was given) or a sat_delivery_performed row, recorded in the ICU that day, unless its value says the trial was not done
+        alternatives: [Respiratory dashboard SAT (documented or EHR phenotype)]
+        source: CLIF patient_assessments mCIDE; ABCDEF bundle element B
+      - id: eligibility
+        label: Eligibility
+        value: imv_sedative_no_paralytic
+        display: On invasive ventilation, with a continuous sedative running and no paralytic infusion at any time that day. Comfort care is not excluded (the respiratory dashboard excludes it)
+        alternatives: [Exclude comfort care]
+        source: Local choice
+
+  sbt:
+    number: L3
+    domain: "B: Awakening and breathing trials"
+    title: Documented spontaneous breathing trial on ventilated days
+    short: SBT documented
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: Ventilated days with a documented SBT
+    denominator: ICU days on invasive ventilation
+    decisions:
+      - id: documented
+        label: Documented SBT
+        value: [sbt_delivery_pass_fail, sbt_delivery_performed]
+        display: An sbt_delivery_pass_fail row (pass or fail, a trial was given) or an sbt_delivery_performed row, recorded in the ICU that day, unless its value says the trial was not done
+        alternatives: [Respiratory dashboard SBT (documented or EHR phenotype, readiness criteria)]
+        source: CLIF patient_assessments mCIDE; ABCDEF bundle element B
+      - id: eligibility
+        label: Eligibility
+        value: every_ventilated_day
+        display: Every ICU day on invasive ventilation, with no readiness screen (the respiratory dashboard requires FiO2, PEEP and vasopressor limits)
+        alternatives: [Respiratory dashboard readiness criteria]
+        source: Local choice
+
+  sedation_assessed:
+    number: L4
+    domain: "C: Sedation"
+    title: ICU days with a sedation assessment
+    short: RASS assessed
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: ICU days with at least one RASS
+    denominator: Days present
+    decisions: []
+
+  light_sedation:
+    number: L5
+    domain: "C: Sedation"
+    title: RASS readings in the light-sedation range
+    short: RASS −2 to +1
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: RASS readings from −2 to +1
+    denominator: RASS readings in the ICU, excluding readings during a paralytic infusion
+    decisions:
+      - id: target_range
+        label: Target range
+        value: [-2, 1]
+        display: RASS −2 to +1
+        alternatives: [−1 to +1]
+        source: PADIS 2018 (light sedation); same range as the respiratory dashboard
+      - id: unit
+        label: Unit
+        value: reading
+        display: Per reading, as on the respiratory dashboard, but over every ICU patient rather than only during IMV
+        alternatives: [Per day]
+        source: Local choice
+
+  deep_sedation:
+    number: L6
+    domain: "C: Sedation"
+    title: ICU days mostly in deep sedation
+    short: Deep sedation days
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: ICU days on which more than half of the RASS readings are −3 or lower
+    denominator: ICU days with a RASS outside a paralytic infusion
+    decisions:
+      - id: threshold
+        label: Deep sedation
+        value: -3
+        display: RASS −3 or lower in more than half of the day's readings, the respiratory dashboard's rule applied to each day
+        alternatives: [Any RASS of −4 or −5]
+        source: Same rule as the respiratory dashboard (deep_sedation)
+
+  sedative_infusion:
+    number: L7
+    domain: "C: Sedation"
+    title: ICU days on a continuous sedative infusion
+    short: Sedative infusion days
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: ICU days on which a continuous sedative ran
+    denominator: Days present
+    decisions: []
+
+  benzodiazepine_infusion:
+    number: L8
+    domain: "C: Sedation"
+    title: ICU days on a benzodiazepine infusion
+    short: Benzodiazepine infusion days
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: ICU days on which a midazolam or lorazepam infusion ran
+    denominator: Days present
+    decisions: []
+
+  delirium_screened:
+    number: L9
+    domain: "D: Delirium"
+    title: ICU days with a delirium screen
+    short: CAM-ICU done
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: ICU days with at least one CAM-ICU, including unable to assess
+    denominator: Days present
+    decisions: []
+
+  delirium:
+    number: L10
+    domain: "D: Delirium"
+    title: ICU days with a positive delirium screen
+    short: Delirium days
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: ICU days with any positive CAM-ICU
+    denominator: ICU days with a positive or negative CAM-ICU (unable to assess left out)
+    decisions: []
+
+changelog:
+  - date: 2026-10-27
+    change: Initial definitions

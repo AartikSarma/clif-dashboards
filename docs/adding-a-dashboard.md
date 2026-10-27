@@ -70,7 +70,7 @@ def build(site: SiteBuild) -> BuildResult:
                        meta={"months": sorted(rows["month"].unique().tolist())})
 ```
 
-If your measures count events per ICU day, use `src/clif_dash/icu.py`, which the stewardship and microbiology dashboards share: ICU intervals, days present, placing a timed event in the ICU stay that contains it, the analysis window, and the whole-month coverage rule.
+If your measures count events per ICU day, use `src/clif_dash/icu.py`, which every per-day dashboard shares: ICU intervals, days present, placing a timed event in the ICU stay that contains it, the analysis window, and the whole-month coverage rule. For a large table (labs, assessments, infusions), place its rows in DuckDB rather than staging them: inside `icu_session`, `placed_sql` gives each row's encounter, unit and local day, `infusion_runs_sql` and `interval_days_sql` give the ICU days a continuous infusion ran, and only your per-day summary reaches pandas. The glycemic dashboard (`src/clif_dash/dashboards/glycemic/`) is the shortest example.
 
 What `SiteBuild` gives you:
 

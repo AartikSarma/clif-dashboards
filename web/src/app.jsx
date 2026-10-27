@@ -574,7 +574,41 @@ const FLUIDS_LIST = {
   ],
   cell: (e, c) => (e[c] == null ? "—" : c === "icu_days" ? e[c].toFixed(1) : typeof e[c] === "number" && c.startsWith("vol_") ? Math.round(e[c]).toLocaleString() : e[c]),
 };
-const LISTS = { respiratory: RESPIRATORY_LIST, stewardship: STEWARDSHIP_LIST, microbiology: MICROBIOLOGY_LIST, fluids: FLUIDS_LIST };
+// Flow: each row is one ICU encounter, attributed to its first ICU row
+const hours = (v) => (v == null ? "—" : v.toFixed(1));
+const yes = (v) => (v ? "Yes" : "—");
+const FLOW_LIST = {
+  columns: () => [
+    ["label_id", "Hospitalization"], ["month", "Month"], ["unit", "ICU"], ["icu_admission", "ICU admission"],
+    ["icu_days", "ICU days"], ["ed_to_icu_hours", "ED to ICU (h)"], ["transferred_out", "Transferred out"],
+    ["night_transfer_out", "At night"], ["readmitted_48h", "Readmitted ≤ 48 h"], ["died_in_icu", "Died in ICU"],
+    ["discharged_from_icu", "Discharged from ICU"],
+  ],
+  cell: (e, c) => (c === "icu_days" || c === "ed_to_icu_hours" ? hours(e[c]) : typeof e[c] === "number" && c !== "month" ? yes(e[c]) : e[c] ?? "—"),
+};
+// Glycemic, liberation and kidney: each row is one encounter's days in one ICU in one month, with day counts
+const stayList = (counts) => ({
+  columns: () => [["label_id", "Hospitalization"], ["month", "Month"], ["unit", "ICU"], ["first_day", "First day"],
+    ["last_day", "Last day"], ["days_present", "Days present"], ...counts],
+  cell: (e, c) => (e[c] == null ? "—" : typeof e[c] === "number" && !Number.isInteger(e[c]) ? e[c].toFixed(1) : e[c]),
+});
+const GLYCEMIC_LIST = stayList([
+  ["glucose_days", "Days with glucose"], ["glucose_lowest", "Lowest"], ["glucose_highest", "Highest"],
+  ["days_severe_hypo", "Days < 40"], ["days_hypo", "Days < 70"], ["days_severe_hyper", "Days > 300"],
+  ["days_in_range", "Days mean in range"], ["insulin_days", "Insulin infusion days"], ["insulin_hypo_days", "< 70 on insulin"],
+]);
+const LIBERATION_LIST = stayList([
+  ["pain_days", "Pain assessed"], ["imv_days", "IMV days"], ["sat_eligible_days", "SAT eligible"], ["sat_days", "SAT"],
+  ["sbt_days", "SBT"], ["rass_days", "RASS days"], ["rass_in_range", "RASS −2 to +1"], ["rass_readings", "RASS readings"],
+  ["deep_days", "Deep days"], ["sedative_days", "Sedative infusion"], ["benzodiazepine_days", "Benzodiazepine"],
+  ["cam_days", "CAM done"], ["cam_positive_days", "CAM positive"],
+]);
+const KIDNEY_LIST = stayList([
+  ["creatinine_days", "Creatinine days"], ["aki_events", "AKI onset"], ["severe_aki_events", "Stage 2–3 onset"],
+  ["crrt_days", "CRRT days"], ["crrt_dose_mean", "Mean dose (mL/kg/h)"], ["crrt_dose_target_days", "Days ≥ target"],
+]);
+const LISTS = { respiratory: RESPIRATORY_LIST, stewardship: STEWARDSHIP_LIST, microbiology: MICROBIOLOGY_LIST, fluids: FLUIDS_LIST,
+  flow: FLOW_LIST, glycemic: GLYCEMIC_LIST, liberation: LIBERATION_LIST, kidney: KIDNEY_LIST };
 
 // Detail views, by dashboard id: { tab label, component }. A dashboard gets the tab only when
 // its server side has a detail builder and the UI has a view registered here.
@@ -802,7 +836,21 @@ function Quality({ F }) {
       if ((dq.semi_prone_names || []).length) notes.push(`Position names mapped to prone that contain "semi": ${dq.semi_prone_names.join(", ")}. Review the mCIDE mapping.`);
       if (dq.respiratory_rows_without_time) notes.push(`${dq.respiratory_rows_without_time.toLocaleString()} respiratory_support rows have no recorded_dttm and were left out of the ventilator timeline.`);
       if (dq.icu_rows_without_location_type) notes.push(`${dq.icu_rows_without_location_type} ICU ADT rows have no location_type: they appear as "ICU (type not mapped)".`);
-      if (dq.months_counted) notes.push(`Months counted: ${dq.months_counted.first} to ${dq.months_counted.last}, the whole months inside both this dashboard's source records and the span of admissions. ${dq.months_counted.icu_days_left_out.toLocaleString()} ICU days outside them are left out, because rates there would read falsely low (nothing recorded yet) or skewed (only long-staying patients left).`);
+      if (dq.months_counted) {
+        const left = dq.months_counted;
+        const outside = left.icu_days_left_out != null ? `${left.icu_days_left_out.toLocaleString()} ICU days` : `${(left.icu_encounters_left_out ?? 0).toLocaleString()} ICU encounters admitted`;
+        notes.push(`Months counted: ${left.first} to ${left.last}, the whole months inside both this dashboard's source records and the span of admissions. ${outside} outside them are left out, because values there would read falsely low (nothing recorded yet) or skewed (only long-staying patients left).`);
+      }
+      if (dq.documented_sat_rows === 0) notes.push("No documented SAT rows (sat_delivery_pass_fail or sat_delivery_performed): the SAT measure reads 0% because nothing is charted, not because no trials were given. The respiratory dashboard also finds SATs from the EHR.");
+      if (dq.documented_sbt_rows === 0) notes.push("No documented SBT rows (sbt_delivery_pass_fail or sbt_delivery_performed): the SBT measure reads 0% because nothing is charted. The respiratory dashboard also finds SBTs from the EHR.");
+      if (dq.cam_values && Object.keys(dq.cam_values).length) notes.push(`CAM-ICU values recorded: ${Object.entries(dq.cam_values).map(([v, n]) => `${v} (${n.toLocaleString()})`).join(", ")}. Positive is the value "positive", or 1 with no text value; check that this site's values map that way.`);
+      const units = (counts, label) => { const e = Object.entries(counts || {}); if (e.length && e.some(([u]) => !/^mg\/dl$/i.test(u))) notes.push(`${label} rows by reference_unit: ${e.map(([u, n]) => `${u} (${n.toLocaleString()})`).join(", ")}. The thresholds assume mg/dL; convert other units before building.`); };
+      units(dq.glucose_rows_by_unit, "Glucose");
+      units(dq.creatinine_rows_by_unit, "Creatinine");
+      if (dq.glucose_rows_outside_range) notes.push(`${dq.glucose_rows_outside_range.toLocaleString()} glucose results are outside clifpy's plausible range and are not counted.`);
+      if (dq.creatinine_rows_outside_range) notes.push(`${dq.creatinine_rows_outside_range.toLocaleString()} creatinine results are 0 or outside clifpy's plausible range and are not counted.`);
+      if (dq.crrt_days_without_dose) notes.push(`${dq.crrt_days_without_dose.toLocaleString()} CRRT days have no flow rates or no recorded weight, so they are left out of the CRRT dose measure.`);
+      if (dq.icu_encounters_with_negative_ed_time) notes.push(`${dq.icu_encounters_with_negative_ed_time.toLocaleString()} encounters have an ED row starting after their first ICU row, so they have no ED-to-ICU time.`);
       if (dq.input_rows_without_positive_volume) notes.push(`${dq.input_rows_without_positive_volume.toLocaleString()} input rows have a missing, zero or negative volume and are not counted.`);
       const overLimit = Object.entries(dq.input_rows_over_limit || {});
       if (overLimit.length) notes.push(`${overLimit.reduce((n, [, v]) => n + v.rows, 0).toLocaleString()} input rows are above their group's volume limit and are not counted, as likely entry or unit errors (${overLimit.map(([g, v]) => `${g.replaceAll("_", " ")}: ${v.rows.toLocaleString()} rows, ${Math.round(v.litres).toLocaleString()} L`).join("; ")}).`);
