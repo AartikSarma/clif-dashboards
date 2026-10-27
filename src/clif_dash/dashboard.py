@@ -8,7 +8,7 @@ server aggregates from them. The platform calls the module only through it.
 """
 from __future__ import annotations
 
-import resource
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -21,13 +21,30 @@ import pandas as pd
 from . import stage
 from .config import SiteConfig
 
+try:
+    import resource
+except ImportError:  # Windows has no resource module
+    resource = None
+
 # Which rows missed a measure: (rows, the measure as resolved, variant included) -> boolean Series
 MissedRule = Callable[[pd.DataFrame, "Metric"], pd.Series]
 
 
+def peak_memory_gb() -> float | None:
+    """This process's peak memory, or None where the OS does not report it (Windows).
+
+    ru_maxrss is in bytes on macOS and in kilobytes on Linux.
+    """
+    if resource is None:
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return (peak if sys.platform == "darwin" else peak * 1024) / 1e9
+
+
 def log(message: str) -> None:
-    peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9  # bytes on macOS
-    print(f"[{time.strftime('%H:%M:%S')} | peak {peak_gb:.1f} GB] {message}", flush=True)
+    peak = peak_memory_gb()
+    memory = f" | peak {peak:.1f} GB" if peak is not None else ""
+    print(f"[{time.strftime('%H:%M:%S')}{memory}] {message}", flush=True)
 
 
 CHUNKS_PER_WORKER = 4

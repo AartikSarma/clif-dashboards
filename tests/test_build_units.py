@@ -57,3 +57,13 @@ def test_staging_can_keep_only_the_rows_a_dashboard_reads(tmp_path):
     first = load_staged_chunk(cfg, "meds", "medication_admin_intermittent", 0)
     assert first["med_category"].tolist() == ["Cefepime", "vancomycin"]
     assert load_staged_chunk(cfg, "meds", "medication_admin_intermittent", 1)["med_category"].tolist() == ["meropenem"]
+
+
+def test_the_build_log_works_without_the_resource_module(monkeypatch, capsys):
+    """Windows has no resource module; the log line then leaves out peak memory instead of failing."""
+    from clif_dash import dashboard
+
+    monkeypatch.setattr(dashboard, "resource", None)
+    dashboard.log("Phase A")
+    line = capsys.readouterr().out
+    assert line.endswith("] Phase A\n") and "peak" not in line
