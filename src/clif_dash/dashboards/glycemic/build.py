@@ -74,7 +74,7 @@ def data_quality(con, cfg: SiteConfig) -> dict:
             f"SELECT lower(CAST(lab_category AS VARCHAR)), count(*) FROM {source} WHERE {glucose} GROUP BY 1 "
             "ORDER BY 2 DESC").fetchall()},
         "glucose_rows_by_unit": {str(k): int(n) for k, n in con.execute(
-            f"SELECT CAST(reference_unit AS VARCHAR), count(*) FROM {source} WHERE {glucose} GROUP BY 1 "
+            f"SELECT coalesce(CAST(reference_unit AS VARCHAR), '(none)'), count(*) FROM {source} WHERE {glucose} GROUP BY 1 "
             "ORDER BY 2 DESC").fetchall()},
         "glucose_rows_without_time": scalar(f"SELECT count(*) FROM {source} WHERE {glucose} "
                                             f"AND {shared['glucose_time']} IS NULL"),

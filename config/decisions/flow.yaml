@@ -114,7 +114,7 @@ metrics:
       - id: icu_los
         label: ICU days
         value: sum_icu_rows
-        display: Sum of the encounter's ICU ADT rows (out − in); a row with no out time ends at discharge. A readmission's days are included
+        display: Sum of the encounter's ICU ADT rows (out − in); a row with no out time ends at discharge, even when a later row shows the patient left earlier (the transfer-out rule uses that later row instead). A readmission's days are included
         alternatives: [First ICU stay only]
         source: Same rule as the respiratory dashboard (icu_los)
 

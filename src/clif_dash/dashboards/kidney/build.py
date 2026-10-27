@@ -71,7 +71,7 @@ def data_quality(con, cfg: SiteConfig) -> dict:
 
     quality = {
         "creatinine_rows_by_unit": {str(k): int(n) for k, n in con.execute(
-            f"SELECT CAST(reference_unit AS VARCHAR), count(*) FROM {labs} WHERE {creatinine} GROUP BY 1 "
+            f"SELECT coalesce(CAST(reference_unit AS VARCHAR), '(none)'), count(*) FROM {labs} WHERE {creatinine} GROUP BY 1 "
             "ORDER BY 2 DESC").fetchall()},
         "creatinine_rows_outside_range": scalar(
             f"SELECT count(*) FROM {labs} WHERE {creatinine} AND lab_value_numeric IS NOT NULL "
@@ -167,6 +167,7 @@ def crrt_days(con, cfg: SiteConfig, decisions: dict) -> pd.DataFrame:
             JOIN encounter_map AS m ON CAST(s.hospitalization_id AS VARCHAR) = CAST(m.hospitalization_id AS VARCHAR)
             WHERE lower(CAST(s.vital_category AS VARCHAR)) = 'weight_kg'
               AND TRY_CAST(s.vital_value AS DOUBLE) BETWEEN {low} AND {high}
+              AND m.encounter_block IN (SELECT DISTINCT encounter_block FROM placed)
             GROUP BY 1
         """
     return frame_days(con.execute(f"""
