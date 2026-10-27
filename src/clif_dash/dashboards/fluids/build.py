@@ -41,17 +41,32 @@ def site_statistics(con, cfg: SiteConfig) -> dict:
                               "first_admission": utc_text(first_admission), "last_admission": utc_text(last_admission)}}
 
 
+def volume_limit_sql(limits: dict | None, group: str = "input_group") -> str:
+    """SQL for the largest plausible single volume of a row's input group (volume_limits decision).
+
+    No limit when the decision's value is null.
+    """
+    if not limits:
+        return "CAST('infinity' AS DOUBLE)"
+    cases = " ".join(f"WHEN '{g.lower()}' THEN {float(v)}" for g, v in limits.items() if g != "default")
+    default = float(limits.get("default", float("inf")))
+    return f"CASE lower(CAST({group} AS VARCHAR)) {cases} ELSE {default} END"
+
+
 def data_quality(con, cfg: SiteConfig) -> dict:
     source = f"read_parquet('{cfg.table_path('input')}')"
+    limit = volume_limit_sql(shared_values(cfg.decisions()).get("volume_limits"))
 
     def scalar(sql):
-        return int(con.execute(sql).fetchone()[0])
+        return int(con.execute(sql).fetchone()[0] or 0)
 
     return {
         "input_rows_without_time": scalar(f"SELECT count(*) FROM {source} WHERE recorded_dttm IS NULL"),
         "input_rows_without_positive_volume": scalar(
             f"SELECT count(*) FROM {source} WHERE input_volume IS NULL OR input_volume <= 0"),
-        "input_rows_over_5000_ml": scalar(f"SELECT count(*) FROM {source} WHERE input_volume > 5000"),
+        "input_rows_over_limit": {str(k): {"rows": int(n), "litres": float(litres)} for k, n, litres in con.execute(
+            f"SELECT lower(CAST(input_group AS VARCHAR)), count(*), sum(input_volume) / 1000 FROM {source} "
+            f"WHERE input_volume > {limit} GROUP BY 1 ORDER BY 2 DESC").fetchall()},
         "input_rows_by_group": {str(k): int(n) for k, n in con.execute(
             f"SELECT lower(CAST(input_group AS VARCHAR)), count(*) FROM {source} GROUP BY 1 ORDER BY 2 DESC").fetchall()},
     }
@@ -72,10 +87,12 @@ def utc_timestamp(con, source: str, column: str) -> str:
     return f"CAST({column} AS TIMESTAMPTZ)"
 
 
-def daily_volumes(con, cfg: SiteConfig, intervals: pd.DataFrame, mapping: pd.DataFrame) -> pd.DataFrame:
+def daily_volumes(con, cfg: SiteConfig, intervals: pd.DataFrame, mapping: pd.DataFrame,
+                  limits: dict | None) -> pd.DataFrame:
     """mL per encounter, unit, local day and input category, for volumes recorded in an ICU.
 
-    A volume in two overlapping ICU rows counts once, in the earlier one.
+    A volume in two overlapping ICU rows counts once, in the earlier one; a volume above
+    its group's limit (volume_limits) does not count.
     """
     source = f"read_parquet('{cfg.table_path('input')}', file_row_number = true)"
     recorded = utc_timestamp(con, source, "s.recorded_dttm")
@@ -93,6 +110,7 @@ def daily_volumes(con, cfg: SiteConfig, intervals: pd.DataFrame, mapping: pd.Dat
                 JOIN icu_rows AS i ON i.encounter_block = m.encounter_block
                      AND i.in_dttm <= {recorded} AND {recorded} < i.out_dttm
                 WHERE s.input_volume > 0 AND s.recorded_dttm IS NOT NULL
+                      AND s.input_volume <= {volume_limit_sql(limits, "s.input_group")}
                 QUALIFY row_number() OVER (PARTITION BY s.file_row_number ORDER BY i.in_dttm) = 1
             )
             SELECT encounter_block, hospital, unit, CAST(recorded_dttm AS DATE) AS day,
@@ -126,7 +144,7 @@ def build(site: SiteBuild) -> BuildResult:
         log(f"Input records and admissions cover whole months {coverage[0]:%Y-%m} to {coverage[1]:%Y-%m}; "
             f"{icu_days - len(days):,} ICU days outside them left out")
 
-    volumes = daily_volumes(con, cfg, intervals, site.mapping)
+    volumes = daily_volumes(con, cfg, intervals, site.mapping, shared.get("volume_limits"))
     log(f"Input: {volumes['volume'].sum() / 1000:,.0f} L recorded in ICUs across "
         f"{volumes['encounter_block'].nunique():,} encounters")
     by_group = volumes.pivot_table(index=DAY_KEY, columns="input_group", values="volume", aggfunc="sum")

@@ -9,6 +9,11 @@ export function fmt(v, meta, digits, compact = false) {
   return `${v.toFixed(d)} ${compact && meta.unit_short ? meta.unit_short : meta.unit}`;
 }
 
+const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+/** An axis tick: thousands separated, and compact (12K, 2.5M) once wide enough to clip. */
+export const tickLabel = (t) => (Math.abs(t) >= 10000 ? COMPACT.format(t) : t.toLocaleString("en-US"));
+
 /** Target status: good | warning | critical | none */
 export function status(value, meta) {
   if (value == null || meta.target == null || meta.direction === "neutral") return "none";

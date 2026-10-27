@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState, useLayoutEffect } from "react";
 import { scaleLinear, scaleBand, scalePoint } from "d3-scale";
+import { tickLabel } from "./format.js";
 import { line as d3line, area as d3area, curveMonotoneX } from "d3-shape";
 
 export function useWidth(initial = 640) {
@@ -96,7 +97,7 @@ export function RunChart({ points, meta, control, target, height = 280, format }
           {y.ticks(5).map((t) => (
             <g key={t}>
               <line x1={0} x2={iw} y1={y(t)} y2={y(t)} className="grid" />
-              <text x={-8} y={y(t)} dy="0.32em" textAnchor="end" className="tick">{pct ? `${t}%` : t}</text>
+              <text x={-8} y={y(t)} dy="0.32em" textAnchor="end" className="tick">{pct ? `${t}%` : tickLabel(t)}</text>
             </g>
           ))}
           {points.map((p, i) => i % step === 0 && (
@@ -157,7 +158,7 @@ export function BarBreakdown({ rows, meta, target, format, onPick }) {
           {x.ticks(5).map((t) => (
             <g key={t}>
               <line x1={x(t)} x2={x(t)} y1={0} y2={rows.length * rowH} className="grid" />
-              <text x={x(t)} y={rows.length * rowH + 18} textAnchor="middle" className="tick">{pct ? `${t}%` : t}</text>
+              <text x={x(t)} y={rows.length * rowH + 18} textAnchor="middle" className="tick">{pct ? `${t}%` : tickLabel(t)}</text>
             </g>
           ))}
           {rows.map((r) => {
@@ -214,7 +215,7 @@ export function StrataLines({ series, months, meta, format, height = 240 }) {
           {y.ticks(5).map((t) => (
             <g key={t}>
               <line x1={0} x2={iw} y1={y(t)} y2={y(t)} className="grid" />
-              <text x={-8} y={y(t)} dy="0.32em" textAnchor="end" className="tick">{pct ? `${t}%` : t}</text>
+              <text x={-8} y={y(t)} dy="0.32em" textAnchor="end" className="tick">{pct ? `${t}%` : tickLabel(t)}</text>
             </g>
           ))}
           {months.map((mo, i) => i % step === 0 && (

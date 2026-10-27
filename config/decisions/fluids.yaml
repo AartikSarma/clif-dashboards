@@ -42,6 +42,13 @@ shared:
     alternatives: []
     source: CLIF 3.0 input schema
 
+  - id: volume_limits
+    label: Implausible volumes
+    value: {default: 5000, renal_replacement_fluids: 50000, flush_irrigation: 50000}
+    display: "A single input row above its group's limit is left out as a likely entry or unit error: 5,000 mL for most groups, 50,000 mL for renal replacement fluids and irrigation, which some sites chart as one running total per day. The rows left out and their volume are counted on the data-quality page"
+    alternatives: [No limit (every positive volume counts)]
+    source: Local choice
+
   - id: input_coverage
     label: Months counted
     value: whole_months
@@ -196,3 +203,5 @@ metrics:
 changelog:
   - date: 2026-10-27
     change: Initial definitions, from the CLIF 3.0 input mCIDE
+  - date: 2026-10-27
+    change: Leave out single rows above a per-group volume limit; one implausible row made a month's mean read in the millions of mL per day

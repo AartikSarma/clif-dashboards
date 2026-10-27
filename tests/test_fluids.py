@@ -6,6 +6,7 @@ as UTC timestamps without a zone, which the build must read as UTC.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -55,9 +56,11 @@ def write_site(folder: Path, with_input: bool = True) -> Path:
             ("H1", "2024-03-02 09:00", "blood_products", "blood_products", 300),
             ("H1", "2024-03-02 10:00", "flush_irrigation_urine", "flush_irrigation", 200),
             ("H1", "2024-03-02 11:00", "iv_crystalloid", "iv_fluids", -50),           # negative: not counted
+            ("H1", "2024-03-02 12:00", "renal_replacement_fluids", "renal_replacement_fluids", 20000),  # a day's CRRT: under its limit
             ("H1", "2024-03-03 09:00", "iv_medication", "medication_fluids", 100),
             ("H1", "2024-03-03 11:00", "iv_crystalloid", "iv_fluids", 1000),         # after the ICU: not counted
             ("H2", "2024-03-10 12:00", "iv_crystalloid", "iv_fluids", 500),
+            ("H2", "2024-03-10 13:00", "iv_crystalloid", "iv_fluids", 2_000_000),    # above the limit: not counted
             ("H3", "2024-04-01 01:00", "other", "other", 100),
             ("H4", "2024-03-01 12:00", "iv_crystalloid", "iv_fluids", 999),          # a child
         ], columns=["hospitalization_id", "recorded_dttm", "input_category", "input_group", "input_volume"])
@@ -78,16 +81,20 @@ def write_site(folder: Path, with_input: bool = True) -> Path:
 
 
 @pytest.fixture(scope="module")
-def stay_months(tmp_path_factory):
-    output = build(load_config(write_site(tmp_path_factory.mktemp("fluids_site"))), FLUIDS)
-    return pd.read_parquet(output / "stay_months.parquet").set_index(["label_id", "month"])
+def built(tmp_path_factory):
+    return build(load_config(write_site(tmp_path_factory.mktemp("fluids_site"))), FLUIDS)
+
+
+@pytest.fixture(scope="module")
+def stay_months(built):
+    return pd.read_parquet(built / "stay_months.parquet").set_index(["label_id", "month"])
 
 
 COLUMNS = ["vol_total", "vol_iv_fluids", "vol_iv_crystalloid", "vol_iv_colloid", "vol_blood_products",
            "vol_nutrition", "vol_medication_fluids", "vol_renal_replacement_fluids", "vol_flush_irrigation",
            "vol_other"]
 EXPECTED = {
-    ("H1", "2024-03"): (2.0, [2350, 1250, 1000, 250, 300, 500, 100, 0, 200, 0]),
+    ("H1", "2024-03"): (2.0, [22350, 1250, 1000, 250, 300, 500, 100, 20000, 200, 0]),
     ("H2", "2024-03"): (27 / 24, [500, 500, 500, 0, 0, 0, 0, 0, 0, 0]),
     ("H3", "2024-03"): (4 / 24, [0] * 10),
     ("H3", "2024-04"): (4 / 24, [100, 0, 0, 0, 0, 0, 0, 0, 0, 100]),
@@ -99,6 +106,11 @@ def test_volumes_and_icu_days(stay_months):
     for key, (icu_days, volumes) in EXPECTED.items():
         assert stay_months.loc[key, "icu_days"] == pytest.approx(icu_days), key
         assert stay_months.loc[key, COLUMNS].astype(float).tolist() == volumes, key
+
+
+def test_volumes_above_their_group_limit_are_counted_as_data_quality(built):
+    quality = json.loads((built / "summary.json").read_text())["data_quality"]
+    assert quality["input_rows_over_limit"] == {"iv_fluids": {"rows": 1, "litres": 2000.0}}
 
 
 def test_a_dashboard_whose_tables_are_missing_is_skipped_only_when_the_site_chose_none(tmp_path):
