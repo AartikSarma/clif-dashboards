@@ -12,8 +12,10 @@ before.
 The translation inverts clifpy's own 2.1 -> 3.0 crosswalk
 (clifpy.utils.crosswalk: its normalizer plus the renames in
 schemas/crosswalks/clif_2.1_to_3.0.yaml) over every 2.1 permissible value. 3.0
-values with no 2.1 equivalent are left as they are, except mode t_piece, which
-clifpy's 2.1 waterfall itself records as Blow by.
+values with no 2.1 equivalent are left as they are, except T-piece: device
+t_piece reads as IMV (a T-piece trial is a breathing trial through the airway,
+not liberation from it), and a T-piece row with no mode, or mode t_piece, reads
+as Blow by, which is how clifpy's 2.1 waterfall records a T-piece.
 """
 from __future__ import annotations
 
@@ -24,7 +26,8 @@ import pandas as pd
 import yaml
 
 # 3.0 values with no 2.1 permissible value that the 2.1 code still has a name for
-EXTRA = {("respiratory_support", "mode_category"): {"t_piece": "Blow by"}}
+EXTRA = {("respiratory_support", "device_category"): {"t_piece": "IMV"},
+         ("respiratory_support", "mode_category"): {"t_piece": "Blow by"}}
 
 
 @lru_cache(maxsize=None)
@@ -58,6 +61,10 @@ def clif30_to_clif21(table: str) -> dict[str, dict[str, str]]:
 
 def to_clif21(table: str, frame: pd.DataFrame) -> pd.DataFrame:
     """Rewrite any CLIF 3.0 category values in `frame` (a CLIF `table`) as their 2.1 values, in place."""
+    if table == "respiratory_support" and {"device_category", "mode_category"} <= set(frame.columns):
+        t_piece = frame["device_category"].astype(object).eq("t_piece") & frame["mode_category"].isna()
+        if t_piece.any():
+            frame["mode_category"] = frame["mode_category"].astype(object).where(~t_piece, "Blow by")
     for column, mapping in clif30_to_clif21(table).items():
         if column not in frame.columns or not len(frame):
             continue

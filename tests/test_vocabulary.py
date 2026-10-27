@@ -34,11 +34,12 @@ def test_every_21_value_survives_clifpys_crosswalk_and_back(table):
 
 
 def test_the_values_the_respiratory_code_names():
-    frame = pd.DataFrame({"device_category": ["imv", "trach_collar", "hfnc", "IMV"],
-                          "mode_category": ["acvc", "ps_or_cpap", "t_piece", None]})
+    frame = pd.DataFrame({"device_category": ["imv", "trach_collar", "hfnc", "IMV", "t_piece", "t_piece"],
+                          "mode_category": ["acvc", "ps_or_cpap", "t_piece", None, None, "ps_or_cpap"]})
     assert to_clif21("respiratory_support", frame).to_dict("list") == {
-        "device_category": ["IMV", "Trach Collar", "High Flow NC", "IMV"],
-        "mode_category": ["Assist Control-Volume Control", "Pressure Support/CPAP", "Blow by", None]}
+        "device_category": ["IMV", "Trach Collar", "High Flow NC", "IMV", "IMV", "IMV"],
+        "mode_category": ["Assist Control-Volume Control", "Pressure Support/CPAP", "Blow by", None, "Blow by",
+                          "Pressure Support/CPAP"]}
     assert to_clif21("hospitalization", pd.DataFrame({"discharge_category": ["expired", "snf"]}))[
         "discharge_category"].tolist() == ["Expired", "Skilled Nursing Facility (SNF)"]
     assert to_clif21("code_status", pd.DataFrame({"code_status_category": ["dnr_or_dni", "presume_full"]}))[

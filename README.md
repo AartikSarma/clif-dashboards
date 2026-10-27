@@ -182,7 +182,7 @@ The build links hospitalizations into encounters across the site, then hands the
 ## Known limits
 
 - Only parquet tables are supported.
-- A few CLIF 3.0 values have no 2.1 equivalent and are kept as they are. The one that matters is the respiratory_support device `t_piece`: the ventilator waterfall does not treat it as IMV, so a T-piece trial charted with that device ends an IMV episode. The respiratory data-quality page counts such rows.
+- A few CLIF 3.0 values have no 2.1 equivalent and are kept as they are. The exception is the respiratory_support device `t_piece`, which is read as IMV with mode Blow by when no mode is charted, as clifpy's 2.1 waterfall records a T-piece trial, so the trial does not end the IMV episode. The respiratory data-quality page counts these rows.
 - Each build recomputes every encounter; incremental refresh is not built yet.
 - The synthetic data has no documented SAT or SBT assessments, no paralytic or benzodiazepine infusions, no CPOT or BPS pain scores, no point-of-care glucose and none below 40 or above 300 mg/dL, creatinine that varies at random from day to day (so AKI is far too common), one patient who meets the proning criteria, and four antibiotics. Those parts are checked only on paper or by hand-built tests until a site runs them on real data.
 - The stewardship measures follow NHSN's counting rules but are not SAARs: there are no NHSN predicted values, so compare within your site, not against national benchmarks.
