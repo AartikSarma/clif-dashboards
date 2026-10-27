@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from clif_dash.build import build
-from clif_dash.dashboards import RESPIRATORY, STEWARDSHIP
+from clif_dash.dashboards import MICROBIOLOGY, RESPIRATORY, STEWARDSHIP
 from clif_dash.server.app import create_app
 
 
@@ -128,3 +128,16 @@ def test_a_build_older_than_its_measures_is_refused(built, tmp_path):
     summary_path.write_text(json.dumps(summary))
     with pytest.raises(RuntimeError, match="cdi_risk"):
         create_app(old, [STEWARDSHIP])
+
+
+def test_every_measure_page_of_every_dashboard_answers(built):
+    """Measures on secondary tables (antibiotic starts, isolates) included: each page has a funnel."""
+    cfg, _, _ = built
+    build(cfg, STEWARDSHIP)
+    build(cfg, MICROBIOLOGY)
+    every = TestClient(create_app(cfg, [RESPIRATORY, STEWARDSHIP, MICROBIOLOGY]))
+    for dashboard in (RESPIRATORY, STEWARDSHIP, MICROBIOLOGY):
+        for metric in dashboard.metrics:
+            response = every.get(f"/api/{dashboard.id}/metric/{metric.id}")
+            assert response.status_code == 200, (dashboard.id, metric.id)
+            assert response.json()["funnel"], (dashboard.id, metric.id)

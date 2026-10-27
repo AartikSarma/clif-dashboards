@@ -1,9 +1,10 @@
 # CLIF ICU Quality Dashboards
 
-ICU quality-improvement dashboards computed from a site's own [CLIF 2.1](https://clif-consortium.github.io/website/) database and served inside that site. Two dashboards ship today:
+ICU quality-improvement dashboards computed from a site's own [CLIF 2.1](https://clif-consortium.github.io/website/) database and served inside that site. Three dashboards ship today:
 
 - **Respiratory failure**: lung-protective ventilation, proning, liberation, sedation and outcomes for adults on invasive mechanical ventilation.
-- **Antimicrobial stewardship**: NHSN-style days of therapy per 1,000 days present by ICU, for all antibacterials and the NHSN agent groups.
+- **Antimicrobial stewardship**: NHSN-style days of therapy per 1,000 days present by ICU, for all antibacterials, the NHSN agent groups and anti-anaerobic agents, and duplicative anaerobic coverage.
+- **Microbiology**: blood and urine culture use, blood culture contamination, cultures before new antibiotics, hospital-onset bacteremia and C. difficile, and resistance in S. aureus and gram-negative isolates.
 
 Everything runs on one machine inside your institution: a batch build reads your CLIF tables and writes the measures, and a local web server shows them. Nothing is sent anywhere. The build is designed for large sites; at UCSF it handles more than 80,000 ICU admissions.
 
@@ -35,6 +36,7 @@ The build reads parquet files named `<prefix><table>.parquet` (for example `clif
 | Every dashboard | `patient`, `hospitalization`, `adt` | |
 | Respiratory failure | `respiratory_support` | `vitals`, `labs`, `position`, `patient_assessments`, `medication_admin_continuous`, `code_status`, `hospital_diagnosis` |
 | Antimicrobial stewardship | `medication_admin_intermittent` | |
+| Microbiology | `microbiology_culture` | `microbiology_susceptibility`, `microbiology_nonculture`, `medication_admin_intermittent` |
 
 A respiratory measure whose table is missing shows as unavailable. A missing required table stops the build with a message that names it.
 
@@ -54,7 +56,7 @@ file_prefix: clif_                         # the part of each file name before t
 site_name: My Hospital ICUs                # shown in the dashboard header
 site_timezone: America/Chicago             # days and months are grouped in this zone
 output_dir: /path/inside/your/institution  # built tables: these contain PHI
-dashboards: [respiratory, stewardship]     # the dashboards to build and serve
+dashboards: [respiratory, stewardship, microbiology]   # the dashboards to build and serve
 workers: 8                                 # parallel processes; up to one fewer than your CPU cores
 ```
 

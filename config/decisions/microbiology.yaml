@@ -1,0 +1,362 @@
+# =============================================================================
+# Microbiology dashboard: decision log
+# =============================================================================
+# Every analytic choice the microbiology dashboard makes is read from this file
+# and from platform.yaml, whose site-wide choices come first under `shared:`.
+# Change a `value`, rebuild (`uv run clif-dash build`), and both the numbers and
+# each measure's "How this is calculated" panel update.
+#
+# Sources marked "NHSN" were checked against the NHSN Patient Safety Component
+# Manual (January 2026): chapter 4, Bloodstream Infection Event, and chapter 12,
+# MDRO and CDI Module, and against NHSN's common commensal list (2024). Choices
+# marked "Local choice" have no external definition and are for a site's
+# infection prevention and stewardship teams to review.
+#
+# Organisms, fluids and drugs are CLIF microbiology category values, compared
+# case-insensitively. Record why you changed a default under `changelog`.
+# =============================================================================
+
+version: 1
+
+shared:
+  - id: icu_locations
+    label: Locations
+    value: icu
+    display: ADT rows with location_category icu; the unit is the location_type (e.g. Medical ICU), as on the other dashboards
+    alternatives: [All inpatient locations]
+    source: Dashboard scope (ICU quality)
+
+  - id: days_present
+    label: Days present
+    value: calendar_days_touched
+    display: Each local calendar day on which the patient spent any time in the unit counts as one day present, counted as on the stewardship dashboard
+    alternatives: [Midnight census]
+    source: NHSN (patient days, location level)
+
+  - id: culture_coverage
+    label: Months counted
+    value: whole_months
+    display: "Only whole months inside both the site's culture records (first to last collected culture) and its admissions. Before culture records begin, ICU days cannot show cultures; after the last admission, only long-staying patients remain"
+    alternatives: [all (every month with ICU days)]
+    source: Local choice
+
+  - id: event_location
+    label: Where a specimen counts
+    value: location_at_collection
+    display: The ICU whose ADT row contains the collection time (in ≤ time < out); specimens collected outside an ICU count only where a rule looks across the whole encounter (matching commensals, cultures before an antibiotic, recurrent C. difficile)
+    alternatives: []
+    source: NHSN (location of specimen collection)
+
+  - id: draw
+    label: Culture draw
+    value: distinct_collection_time
+    display: One culture draw is one collection time for one encounter and specimen type. CLIF has no specimen number, so two blood culture sets collected in the same minute count as one draw, and the share of solitary blood culture sets cannot be computed
+    alternatives: []
+    source: Local choice (CLIF limitation)
+
+  - id: blood_fluids
+    label: Blood specimens
+    value: [blood_buffy]
+    display: Culture rows with fluid_category blood_buffy and method_category culture
+    alternatives: []
+    source: CLIF mCIDE microbiology_culture
+
+  - id: urine_fluids
+    label: Urine specimens
+    value: [genito_urinary_tract, kidneys_renal_pelvis_ureters_bladder]
+    display: Culture rows with fluid_category genito_urinary_tract or kidneys_renal_pelvis_ureters_bladder and method_category culture
+    alternatives: [genito_urinary_tract only]
+    source: CLIF mCIDE microbiology_culture
+
+  - id: commensal_groups
+    label: Common commensals (organism groups)
+    value: [staphylococcus_coag_neg, micrococcus, corynebacterium, bacillus, propionbacterium, stomatococcus_mucilaginosis, rhodococcus]
+    display: Coagulase-negative staphylococci, Micrococcus, Corynebacterium, Bacillus, Propionibacterium/Cutibacterium, Rothia (Stomatococcus) mucilaginosa and Rhodococcus, by CLIF organism_group
+    alternatives: []
+    source: NHSN common commensal list (2024), mapped to CLIF organism groups
+
+  - id: commensal_categories
+    label: Common commensals (organism categories)
+    value: [actinomyces_, aerococcus_, arthrobacter_, brevibacterium_, cutibacterium_, dermabacter_, gordonia_, kocuria_, microbacterium_, paenibacillus_, rothia_, streptococcus_alphahemolytic, streptococcus_viridans, streptococcus_mitis, streptococcus_oralis, streptococcus_sanguinis, streptococcus_parasanguinis, streptococcus_salivarius, streptococcus_mutans, streptococcus_gordonii]
+    display: "Further NHSN common commensals, by CLIF organism_category (a trailing underscore matches every species of the genus): Actinomyces, Aerococcus, Arthrobacter, Brevibacterium, Cutibacterium, Dermabacter, Gordonia, Kocuria, Microbacterium, Paenibacillus, Rothia, and viridans-group streptococci"
+    alternatives: []
+    source: NHSN common commensal list (2024), mapped to CLIF organism categories
+
+  - id: commensal_exceptions
+    label: Not commensals
+    value: [bacillus_anthracis, corynebacterium_diphtheriae]
+    display: Bacillus anthracis and Corynebacterium diphtheriae are pathogens despite their genus
+    alternatives: []
+    source: NHSN common commensal list (2024)
+
+  - id: matching_commensal
+    label: Matching commensals
+    value: same_or_next_calendar_day
+    display: A common commensal counts as real (not a contaminant) when the same organism category grows from another blood draw of the same encounter, collected at a different time on the same or a consecutive calendar day
+    alternatives: []
+    source: NHSN BSI chapter (two specimens on separate occasions, same or consecutive calendar days)
+
+  - id: control_limits
+    label: Control limits
+    value: by_unit
+    display: Drawn for shares of blood culture draws, antibiotic starts and isolates. Not drawn for rates per day present, because cultures cluster within patients
+    alternatives: []
+    source: Local choice
+
+metrics:
+  blood_cultures:
+    number: M1
+    domain: Diagnostic stewardship
+    title: Blood culture draws per 1,000 days present
+    short: Blood cultures
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: neutral
+    target: null
+    numerator: Blood culture draws collected in the ICU
+    denominator: Days present in the ICU
+    decisions: []
+
+  urine_cultures:
+    number: M2
+    domain: Diagnostic stewardship
+    title: Urine culture draws per 1,000 days present
+    short: Urine cultures
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Urine culture draws collected in the ICU
+    denominator: Days present in the ICU
+    decisions: []
+
+  blood_culture_contamination:
+    number: M3
+    domain: Diagnostic stewardship
+    title: Blood culture contamination
+    short: Contaminated blood cultures
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Blood culture draws growing only common commensals, none matched by another draw on the same or next day
+    denominator: Blood culture draws collected in the ICU
+    decisions:
+      - id: contaminant
+        label: Contaminant
+        value: single_commensal
+        display: A draw is contaminated when everything it grows is a common commensal and none of those organisms grows from another blood draw of the encounter on the same or a consecutive calendar day. CLSI M47 is widely cited for a benchmark below 3%; it was not checked against the document, so no target is set
+        alternatives: []
+        source: NHSN BSI chapter ("a common commensal identified in a single blood specimen is considered a contaminant")
+
+  cultures_before_antibiotics:
+    number: M4
+    domain: Diagnostic stewardship
+    title: Blood culture before a new antibacterial start
+    short: Culture before antibiotics
+    unit: "%"
+    direction: higher
+    target: null
+    numerator: New IV antibacterial starts with a blood culture collected in the 48 h before the first dose
+    denominator: New IV antibacterial starts in the ICU
+    decisions:
+      - id: agents
+        label: Antibacterials
+        value: [amikacin, amoxicillin, amoxicillin_clavulanate, ampicillin, ampicillin_sulbactam, azithromycin,
+                aztreonam, cefaclor, cefadroxil, cefamandole, cefazolin, cefdinir, cefepime, cefiderocol, cefixime,
+                cefmetazole, cefonicid, cefoperazone, cefotaxime, cefotetan, cefoxitin, cefpodoxime, cefprozil,
+                ceftaroline, ceftazidime, ceftazidime_avibactam, ceftazidime_clavulanate, ceftibuten, ceftizoxime,
+                ceftolozane_tazobactam, ceftriaxone, cefuroxime, cephalexin, cephalothin, cephapirin, cephradine,
+                chloramphenicol, cinoxacin, ciprofloxacin, clarithromycin, clindamycin, cloxacillin, colistin,
+                dalbavancin, daptomycin, delafloxacin, dicloxacillin, doripenem, doxycycline, eravacycline,
+                ertapenem, erythromycin, fidaxomicin, fosfomycin, gatifloxacin, gentamicin, imipenem,
+                imipenem_relebactam, kanamycin, lefamulin, levofloxacin, lincomycin, linezolid, meropenem,
+                meropenem_vaborbactam, methicillin, metronidazole, mezlocillin, minocycline, moxifloxacin,
+                nafcillin, nitrofurantoin, norfloxacin, ofloxacin, omadacycline, oritavancin, oxacillin,
+                penicillin, piperacillin_tazobactam, pivampicillin, plazomicin, polymyxin_b,
+                quinupristin_dalfopristin, rifampin, streptomycin, sulbactam_durlobactam, sulfadiazine,
+                sulfadiazine_trimethoprim, sulfisoxazole, tedizolid, telavancin, telithromycin, tetracycline,
+                ticarcillin, ticarcillin_clavulanate, tigecycline, tobramycin, trimethoprim,
+                trimethoprim_sulfamethoxazole, vancomycin]
+        display: The stewardship dashboard's antibacterials (S1); a test keeps the two lists identical
+        alternatives: []
+        source: Local choice
+      - id: new_start
+        label: New start
+        value: 48
+        display: An administered IV dose of an antibacterial with no administered antibacterial dose, by any route, in the encounter's previous 48 h, given in the ICU
+        alternatives: [72 h, 7 days]
+        source: Local choice
+      - id: culture_window_h
+        label: Culture window
+        value: 48
+        display: A blood culture collected in the 48 h before the first dose, anywhere in the hospital
+        alternatives: [Up to 1 h after the first dose]
+        source: Local choice
+
+  hospital_onset_bacteremia:
+    number: M5
+    domain: Hospital-onset infections
+    title: Hospital-onset bacteremia and fungemia per 1,000 days present
+    short: Hospital-onset bacteremia
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: lower
+    target: null
+    numerator: Hospital-onset bloodstream events in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: positive_draw
+        label: Positive blood culture
+        value: pathogen_or_matched_commensal
+        display: A blood draw growing a bacterium or fungus that is not a common commensal, or a common commensal matched by another draw on the same or next day
+        alternatives: []
+        source: NHSN BSI chapter (LCBI 1 and 2 organism criteria)
+      - id: onset_day
+        label: Hospital onset
+        value: 4
+        display: Collected on hospital day 4 or later, where day 1 is the day of admission (the linked encounter's admission). Studies of hospital-onset bacteremia use day 3 or day 4; NHSN has no HOB protocol, so this uses NHSN's hospital-onset day for LabID events
+        alternatives: [Day 3]
+        source: NHSN MDRO and CDI Module (healthcare facility-onset, hospital day 4)
+      - id: repeat_days
+        label: Repeat events
+        value: 14
+        display: After an event, further positive blood cultures in the encounter are part of it until 14 days have passed since its collection date
+        alternatives: []
+        source: NHSN repeat infection timeframe (14 days)
+
+  hospital_onset_cdi:
+    number: M6
+    domain: Hospital-onset infections
+    title: Hospital-onset C. difficile per 10,000 days present
+    short: Hospital-onset C. difficile
+    unit: per 10,000 days present
+    unit_short: /10k days
+    direction: lower
+    target: null
+    numerator: Incident, hospital-onset C. difficile LabID events in the ICU
+    denominator: Days present in the ICU
+    decisions:
+      - id: positive_test
+        label: Positive test
+        value: nonculture_detected
+        display: A microbiology_nonculture result for clostridium_difficile categorized detected (PCR or toxin assay). NHSN counts only the last test of a multistep algorithm; a site whose PCR-positive specimens are reflexed to a negative toxin test will read higher here than in NHSN
+        alternatives: []
+        source: NHSN MDRO and CDI Module (C. difficile-positive laboratory assay)
+      - id: duplicate_days
+        label: Duplicates
+        value: 14
+        display: A positive test within 14 days of the patient's most recent positive test in the same location is a duplicate
+        alternatives: []
+        source: NHSN MDRO and CDI Module (14-day rule)
+      - id: onset_day
+        label: Hospital onset
+        value: 4
+        display: Collected on hospital day 4 or later, where day 1 is the day of admission
+        alternatives: []
+        source: NHSN MDRO and CDI Module (healthcare facility-onset)
+      - id: incident_days
+        label: Incident
+        value: 56
+        display: Counted only when the patient had no C. difficile LabID event in the previous 56 days (otherwise it is recurrent)
+        alternatives: [Count recurrent events too]
+        source: NHSN MDRO and CDI Module (incident CDI LabID event)
+
+  mrsa:
+    number: M7
+    domain: Resistance
+    title: Methicillin resistance among S. aureus isolates
+    short: MRSA share of S. aureus
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: S. aureus isolates non-susceptible to oxacillin, cefoxitin or methicillin
+    denominator: S. aureus isolates from cultures collected in the ICU with a result for one of those drugs
+    decisions:
+      - id: organisms
+        label: Organisms
+        value: [staphylococcus_aureus]
+        display: Staphylococcus aureus
+        alternatives: []
+        source: CLIF mCIDE organism categories
+      - id: drugs
+        label: Drugs tested
+        value: [oxacillin, cefoxitin, methicillin]
+        display: Oxacillin, cefoxitin or methicillin non-susceptible
+        alternatives: []
+        source: Local choice
+      - id: first_isolate
+        label: First isolate
+        value: per_encounter
+        display: The first isolate of each organism category per encounter, from any specimen collected in the ICU. CLSI M39 counts the first isolate per patient per analysis period; per encounter is a simplification. CLIF's non_susceptible includes intermediate results; indeterminate or missing results leave the denominator
+        alternatives: [First isolate per patient per year]
+        source: Local choice, after CLSI M39
+
+  ceftriaxone_ns_enterobacterales:
+    number: M8
+    domain: Resistance
+    title: Ceftriaxone non-susceptibility among Enterobacterales
+    short: Ceftriaxone-resistant Enterobacterales
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Enterobacterales isolates non-susceptible to ceftriaxone
+    denominator: Enterobacterales isolates from cultures collected in the ICU with a ceftriaxone result
+    decisions:
+      - id: organisms
+        label: Organisms
+        value: [escherichia_, klebsiella_, enterobacter_, citrobacter_, serratia_, proteus_, morganella_, providencia_, raoultella_, hafnia_, salmonella_, shigella_]
+        display: Enterobacterales by genus (Escherichia, Klebsiella, Enterobacter, Citrobacter, Serratia, Proteus, Morganella, Providencia, Raoultella, Hafnia, Salmonella, Shigella)
+        alternatives: []
+        source: Local choice
+      - id: drugs
+        label: Drugs tested
+        value: [ceftriaxone]
+        display: Ceftriaxone, a common marker of extended-spectrum beta-lactamase production
+        alternatives: [Ceftriaxone or cefotaxime]
+        source: Local choice
+      - id: first_isolate
+        label: First isolate
+        value: per_encounter
+        display: As for M7
+        alternatives: []
+        source: Local choice, after CLSI M39
+
+  carbapenem_ns_gram_negatives:
+    number: M9
+    domain: Resistance
+    title: Carbapenem non-susceptibility among gram-negative isolates
+    short: Carbapenem-resistant gram-negatives
+    unit: "%"
+    direction: lower
+    target: null
+    numerator: Isolates non-susceptible to a carbapenem
+    denominator: Enterobacterales, Pseudomonas aeruginosa and Acinetobacter baumannii isolates from cultures collected in the ICU with a carbapenem result
+    decisions:
+      - id: organisms
+        label: Organisms
+        value: [escherichia_, klebsiella_, enterobacter_, citrobacter_, serratia_, proteus_, morganella_, providencia_, raoultella_, hafnia_, salmonella_, shigella_, pseudomonas_aeruginosa, acinetobacter_baumannii]
+        display: The M8 Enterobacterales, Pseudomonas aeruginosa and Acinetobacter baumannii
+        alternatives: []
+        source: Local choice
+      - id: drugs
+        label: Drugs tested
+        value: [meropenem, imipenem, doripenem, ertapenem]
+        display: Meropenem, imipenem, doripenem or ertapenem non-susceptible
+        alternatives: []
+        source: Local choice
+      - id: not_tested
+        label: Drug-organism pairs ignored
+        value: ["ertapenem:pseudomonas_aeruginosa", "ertapenem:acinetobacter_baumannii"]
+        display: Ertapenem has no useful activity against Pseudomonas aeruginosa or Acinetobacter baumannii, so their ertapenem results are ignored and only the other carbapenems count
+        alternatives: []
+        source: Local choice
+      - id: first_isolate
+        label: First isolate
+        value: per_encounter
+        display: As for M7
+        alternatives: []
+        source: Local choice, after CLSI M39
+
+changelog:
+  - date: 2026-10-27
+    change: Initial definitions

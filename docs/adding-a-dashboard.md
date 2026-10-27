@@ -70,6 +70,8 @@ def build(site: SiteBuild) -> BuildResult:
                        meta={"months": sorted(rows["month"].unique().tolist())})
 ```
 
+If your measures count events per ICU day, use `src/clif_dash/icu.py`, which the stewardship and microbiology dashboards share: ICU intervals, days present, placing a timed event in the ICU stay that contains it, the analysis window, and the whole-month coverage rule.
+
 What `SiteBuild` gives you:
 
 - `site.cfg`: the site config, bound to your dashboard. `cfg.decisions()` returns your merged decisions; `cfg.stage_dir` is your scratch folder; `cfg.site_timezone` is the local zone; `cfg.start_date` and `cfg.end_date` are the optional analysis window.

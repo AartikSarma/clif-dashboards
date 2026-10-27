@@ -87,8 +87,10 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         return resolve_route(route_id, metrics, store.decisions, store.meta)
 
     def funnel_for(source: str):
-        """The primary table's cohort funnel is `funnel`; another table's is `<name>_funnel`."""
-        return store.summary.get("funnel" if source == primary else f"{source}_funnel")
+        """The primary table's cohort funnel is `funnel`; another table's is `<name>_funnel`, or the
+        primary funnel when the table has none of its own (it is drawn from the same cohort)."""
+        own = store.summary.get(f"{source}_funnel") if source != primary else None
+        return own if own is not None else store.summary.get("funnel")
 
     @router.get("/meta")
     def meta():
