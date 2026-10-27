@@ -21,6 +21,7 @@ import pandas as pd
 from ... import stage
 from ...config import SiteConfig
 from ...dashboard import BuildResult, SiteBuild, assign_chunks, log
+from ...icu import DAY_KEY, days_present, icu_intervals, in_window, lower, place_in_icu, utc_text, whole_months
 from ...upstream import prep
 
 TABLES = ("medication_admin_intermittent",)
@@ -28,8 +29,6 @@ REQUIRED_TABLES = ("medication_admin_intermittent",)
 # Measures counted as days of therapy, each a column dot_<id>; their agents are in the decisions
 GROUPS = ("all_antibacterial", "broad_hospital_onset", "broad_community", "resistant_gram_positive",
           "narrow_beta_lactam", "cdi_risk", "antifungal_candidiasis", "anaerobic")
-DAY_KEY = ["encounter_block", "hospital", "unit", "day"]
-ONE_MICROSECOND = pd.Timedelta(microseconds=1)
 
 
 def shared_values(decisions: dict) -> dict:
@@ -43,53 +42,6 @@ def group_agents(decisions: dict) -> dict[str, tuple[set[str], set[str]]]:
         values = {d["id"]: d["value"] for d in decisions["metrics"][group]["decisions"]}
         groups[group] = ({a.lower() for a in values["agents"]}, {a.lower() for a in values.get("iv_only") or []})
     return groups
-
-
-def lower(series: pd.Series) -> pd.Series:
-    return series.astype("string").str.lower()
-
-
-def icu_intervals(site: SiteBuild) -> tuple[pd.DataFrame, int]:
-    """Adult encounters' ICU ADT rows with an end time; also how many rows had none at all."""
-    cfg = site.cfg
-    shared = shared_values(cfg.decisions())
-    adults = site.encounters.loc[site.encounters["adult"], ["encounter_block", "discharge_dttm"]]
-    adt = site.adt[lower(site.adt["location_category"]).eq(str(shared["icu_locations"]).lower()).fillna(False)]
-    adt = adt.merge(adults, on="encounter_block")
-    adt = adt.assign(out_dttm=adt["out_dttm"].fillna(adt["discharge_dttm"]))
-    unended = int(adt["out_dttm"].isna().sum())
-    adt = adt[adt["out_dttm"].notna() & (adt["out_dttm"] > adt["in_dttm"])]
-    adt = adt.reset_index(drop=True)
-    intervals = pd.DataFrame({
-        "encounter_block": adt["encounter_block"],
-        "hospital": adt["hospital_id"].astype(str),
-        "unit": adt["location_type"].map(prep.unit_label),
-        "in_dttm": adt["in_dttm"],
-        "out_dttm": adt["out_dttm"],
-    })
-    return intervals.sort_values(["encounter_block", "in_dttm"], kind="stable").reset_index(drop=True), unended
-
-
-def days_present(intervals: pd.DataFrame, tz: str) -> pd.DataFrame:
-    """Every local calendar day each ICU row touches, once per encounter, hospital and unit."""
-    if intervals.empty:
-        return pd.DataFrame(columns=DAY_KEY)
-    first = intervals["in_dttm"].dt.tz_convert(tz).dt.normalize().dt.tz_localize(None)
-    last = (intervals["out_dttm"] - ONE_MICROSECOND).dt.tz_convert(tz).dt.normalize().dt.tz_localize(None)
-    n_days = ((last - first).dt.days + 1).to_numpy()
-    expanded = intervals.loc[intervals.index.repeat(n_days), ["encounter_block", "hospital", "unit"]]
-    offsets = np.concatenate([np.arange(n) for n in n_days])
-    expanded["day"] = first.repeat(n_days).to_numpy() + pd.to_timedelta(offsets, unit="D")
-    return expanded.drop_duplicates(DAY_KEY).reset_index(drop=True)
-
-
-def in_window(days: pd.Series, cfg: SiteConfig) -> pd.Series:
-    keep = pd.Series(True, index=days.index)
-    if cfg.start_date:
-        keep &= days >= pd.Timestamp(cfg.start_date)
-    if cfg.end_date:
-        keep &= days <= pd.Timestamp(cfg.end_date)
-    return keep
 
 
 # --------------------------------------------------------------------------- #
@@ -120,33 +72,11 @@ def site_statistics(con, cfg: SiteConfig) -> dict:
                                    "last_admission": utc_text(last_admission)}}
 
 
-def utc_text(value) -> str | None:
-    """A DuckDB timestamp as UTC text, so it pickles to workers and saves to summary.json."""
-    if value is None:
-        return None
-    stamp = pd.Timestamp(value)
-    return str(stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC"))
-
-
 def covered_months(statistics: dict, tz: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
-    """The first and last local days of the whole months inside both the medication
-    records and the span of hospital admissions.
-
-    Before the first recorded dose an ICU day cannot show therapy. After the last
-    admission, the ICU holds only patients admitted earlier, who stay longest and are
-    the most treated, so use reads falsely high; before the first admission the data
-    lack patients already in hospital. The edge months are only partly recorded. None
-    when there are no recorded doses.
-    """
+    """The whole months inside both the medication records and the span of admissions (see icu.whole_months)."""
     records = statistics.get("medication_records", {})
-    if not records.get("first_dose"):
-        return None
-    local = lambda text: pd.Timestamp(text).tz_convert(tz).tz_localize(None).normalize()
-    first = max(local(records["first_dose"]), local(records["first_admission"]))
-    last = min(local(records["last_dose"]), local(records["last_admission"]))
-    start = first if first.day == 1 else first + pd.offsets.MonthBegin(1)
-    end = last if last.is_month_end else last.replace(day=1) - pd.Timedelta(days=1)
-    return start, end
+    return whole_months(records.get("first_dose"), records.get("last_dose"),
+                        records.get("first_admission"), records.get("last_admission"), tz)
 
 
 def data_quality(con, cfg: SiteConfig) -> dict:
@@ -205,13 +135,8 @@ def therapy_chunk(cfg: SiteConfig, chunk: int, statistics: dict) -> dict:
         "iv": lower(meds["med_route_category"]).eq("iv").fillna(False).astype(bool),
         "admin_dttm": meds["admin_dttm"],
     }).merge(mapping, on="hospitalization_id")
-    doses["dose"] = np.arange(len(doses))
-    # The ICU row that contains each dose: in <= time < out. Overlapping rows keep the earlier one.
-    placed = doses.merge(intervals, on="encounter_block")
-    placed = placed[(placed["in_dttm"] <= placed["admin_dttm"]) & (placed["admin_dttm"] < placed["out_dttm"])]
-    placed = placed.sort_values(["dose", "in_dttm"], kind="stable").drop_duplicates("dose")
+    placed = place_in_icu(doses, intervals, "admin_dttm", cfg.site_timezone)
     counts["in_icu"] = int(len(placed))
-    placed["day"] = placed["admin_dttm"].dt.tz_convert(cfg.site_timezone).dt.normalize().dt.tz_localize(None)
     placed = placed[in_window(placed["day"], cfg)]
 
     per_day = []
@@ -255,7 +180,7 @@ def build(site: SiteBuild) -> BuildResult:
     encounters = site.encounters
     adults = encounters[encounters["adult"]]
 
-    intervals, unended = icu_intervals(site)
+    intervals, unended = icu_intervals(site, shared_values(cfg.decisions())["icu_locations"])
     intervals.to_parquet(work / "icu_intervals.parquet", index=False)
     days = days_present(intervals, tz)
     days = days[in_window(days["day"], cfg)].reset_index(drop=True)
