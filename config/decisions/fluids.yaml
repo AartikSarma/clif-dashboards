@@ -1,0 +1,198 @@
+# =============================================================================
+# Fluids dashboard: decision log
+# =============================================================================
+# Every analytic choice the fluids dashboard makes is read from this file and
+# from platform.yaml, whose site-wide choices come first under `shared:`.
+# Change a `value`, rebuild (`uv run clif-dash build`), and both the numbers and
+# each measure's "How this is calculated" panel update.
+#
+# The measures read CLIF 3.0's `input` table and its mCIDE: input_group and
+# input_category (clifpy's CLIF 3.0 input schema). input_name, the site's own
+# label, is never read. Record why you changed a default under `changelog`.
+# =============================================================================
+
+version: 1
+
+shared:
+  - id: icu_locations
+    label: Locations
+    value: icu
+    display: ADT rows with location_category icu; the unit is the location_type (e.g. Medical ICU), as on the other dashboards
+    alternatives: [All inpatient locations]
+    source: Dashboard scope (ICU quality)
+
+  - id: exposure
+    label: ICU days
+    value: icu_hours_over_24
+    display: Volume is divided by time in the ICU, in days (hours ÷ 24), split at local midnight, so a patient in the unit for six hours counts as a quarter of a day and a daylight-saving day has 23 or 25 hours
+    alternatives: [Days present (any part of a calendar day counts as a whole day)]
+    source: Local choice
+
+  - id: volume_location
+    label: Where a volume counts
+    value: location_at_recording
+    display: The ICU whose ADT row contains recorded_dttm (in ≤ time < out); volumes recorded outside an ICU are not counted
+    alternatives: []
+    source: Local choice
+
+  - id: volumes_counted
+    label: Volumes counted
+    value: positive
+    display: input_volume in mL, as recorded; missing, zero and negative volumes are left out and counted on the data-quality page
+    alternatives: []
+    source: CLIF 3.0 input schema
+
+  - id: input_coverage
+    label: Months counted
+    value: whole_months
+    display: "Only whole months inside both the site's input records (first to last recorded_dttm) and its admissions, as on the stewardship and microbiology dashboards"
+    alternatives: [all (every month with ICU days)]
+    source: Local choice
+
+  - id: control_limits
+    label: Control limits
+    value: none
+    display: Not drawn. Volumes cluster within patients and vary widely between them, so limits for a mean would be misleading
+    alternatives: []
+    source: Local choice
+
+metrics:
+  total_input:
+    number: F1
+    domain: All input
+    title: Total recorded input per ICU day
+    short: All input
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: All input volume recorded in the ICU, every input_group
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  iv_fluids:
+    number: F2
+    domain: IV fluids
+    title: IV fluids per ICU day
+    short: IV fluids
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_group iv_fluids (IV crystalloids and colloids)
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  iv_crystalloid:
+    number: F2a
+    domain: IV fluids
+    title: IV crystalloid per ICU day
+    short: IV crystalloid
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_category iv_crystalloid
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions:
+      - id: balanced_versus_saline
+        label: Balanced versus saline
+        value: not_available
+        display: The CLIF 3.0 categories do not separate balanced crystalloids from saline, so their split cannot be shown without reading the site's own input names
+        alternatives: []
+        source: CLIF 3.0 input mCIDE
+
+  iv_colloid:
+    number: F2b
+    domain: IV fluids
+    title: IV colloid per ICU day
+    short: IV colloid
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_category iv_colloid (albumin and other colloids)
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  blood_products:
+    number: F3
+    domain: Other input
+    title: Blood products per ICU day
+    short: Blood products
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_group blood_products
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  nutrition:
+    number: F4
+    domain: Other input
+    title: Nutrition per ICU day
+    short: Nutrition
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_group nutrition (parenteral, enteral, oral intake and enteral water)
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  medication_fluids:
+    number: F5
+    domain: Other input
+    title: Medication fluids per ICU day
+    short: Medication fluids
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_group medication_fluids (IV and enteral medication volumes)
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  renal_replacement_fluids:
+    number: F6
+    domain: Other input
+    title: Renal replacement fluids per ICU day
+    short: Renal replacement fluids
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_group renal_replacement_fluids
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  flush_irrigation:
+    number: F7
+    domain: Other input
+    title: Flushes and irrigation per ICU day
+    short: Flushes and irrigation
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_group flush_irrigation
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+  other_input:
+    number: F8
+    domain: Other input
+    title: Other input per ICU day
+    short: Other input
+    unit: mL per ICU day
+    unit_short: mL/day
+    direction: neutral
+    target: null
+    numerator: Volume with input_group other
+    denominator: ICU days (hours in the ICU ÷ 24)
+    decisions: []
+
+changelog:
+  - date: 2026-10-27
+    change: Initial definitions, from the CLIF 3.0 input mCIDE

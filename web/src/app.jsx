@@ -563,7 +563,18 @@ const MICROBIOLOGY_LIST = {
   ],
   cell: (e, c) => e[c] ?? "—",
 };
-const LISTS = { respiratory: RESPIRATORY_LIST, stewardship: STEWARDSHIP_LIST, microbiology: MICROBIOLOGY_LIST };
+// Fluids: each row is one encounter's ICU time in one unit in one month, with mL by input group
+const FLUIDS_LIST = {
+  columns: () => [
+    ["label_id", "Hospitalization"], ["month", "Month"], ["unit", "ICU"], ["icu_days", "ICU days"],
+    ["vol_total", "All input (mL)"], ["vol_iv_fluids", "IV fluids"], ["vol_iv_crystalloid", "Crystalloid"],
+    ["vol_iv_colloid", "Colloid"], ["vol_blood_products", "Blood products"], ["vol_nutrition", "Nutrition"],
+    ["vol_medication_fluids", "Medication fluids"], ["vol_renal_replacement_fluids", "Renal replacement"],
+    ["vol_flush_irrigation", "Flushes"], ["vol_other", "Other"],
+  ],
+  cell: (e, c) => (e[c] == null ? "—" : c === "icu_days" ? e[c].toFixed(1) : typeof e[c] === "number" && c.startsWith("vol_") ? Math.round(e[c]).toLocaleString() : e[c]),
+};
+const LISTS = { respiratory: RESPIRATORY_LIST, stewardship: STEWARDSHIP_LIST, microbiology: MICROBIOLOGY_LIST, fluids: FLUIDS_LIST };
 
 // Detail views, by dashboard id: { tab label, component }. A dashboard gets the tab only when
 // its server side has a detail builder and the UI has a view registered here.
@@ -792,6 +803,8 @@ function Quality({ F }) {
       if (dq.respiratory_rows_without_time) notes.push(`${dq.respiratory_rows_without_time.toLocaleString()} respiratory_support rows have no recorded_dttm and were left out of the ventilator timeline.`);
       if (dq.icu_rows_without_location_type) notes.push(`${dq.icu_rows_without_location_type} ICU ADT rows have no location_type: they appear as "ICU (type not mapped)".`);
       if (dq.months_counted) notes.push(`Months counted: ${dq.months_counted.first} to ${dq.months_counted.last}, the whole months inside both this dashboard's source records and the span of admissions. ${dq.months_counted.icu_days_left_out.toLocaleString()} ICU days outside them are left out, because rates there would read falsely low (nothing recorded yet) or skewed (only long-staying patients left).`);
+      if (dq.input_rows_without_positive_volume) notes.push(`${dq.input_rows_without_positive_volume.toLocaleString()} input rows have a missing, zero or negative volume and are not counted.`);
+      if (dq.input_rows_over_5000_ml) notes.push(`${dq.input_rows_over_5000_ml.toLocaleString()} input rows record more than 5,000 mL at once. They are counted; check whether they are cumulative totals rather than single volumes.`);
       if (dq.icu_rows_without_end) notes.push(`${dq.icu_rows_without_end.toLocaleString()} ICU ADT rows have no out time and no discharge time, so they add no days present.`);
       if (dq.antimicrobial_rows_without_time) notes.push(`${dq.antimicrobial_rows_without_time.toLocaleString()} antimicrobial administrations have no admin_dttm and are not counted.`);
       if (dq.unmapped_mar_action_rows) notes.push(`${dq.unmapped_mar_action_rows.toLocaleString()} intermittent medication rows have an unmapped MAR action (mar_action_group "other") and are not counted as doses.`);
@@ -886,7 +899,7 @@ function App({ dashboards }) {
           </div>
           <div>
             <div className="title">{META.dashboard.title}</div>
-            <div className="sub">{META.meta.site_name} · built {META.meta.generated_at} · CLIF 2.1
+            <div className="sub">{META.meta.site_name} · built {META.meta.generated_at} · CLIF
               {dashboards.length > 1 && <> · <a href="#/">All dashboards</a></>}
             </div>
           </div>

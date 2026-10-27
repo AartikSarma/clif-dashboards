@@ -31,7 +31,8 @@ def main(argv=None) -> None:
         cfg = load_config(args.config, args.clif_dir)
         if args.workers:
             cfg = replace(cfg, workers=args.workers)
-        build_all(cfg, select_dashboards(parser, args.dashboards or cfg.dashboards))
+        build_all(cfg, select_dashboards(parser, args.dashboards or cfg.dashboards),
+                  skip_unavailable=not (args.dashboards or cfg.dashboards_listed))
     elif args.command == "serve":
         import uvicorn
 

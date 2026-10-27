@@ -77,12 +77,22 @@ def stitch_site(cfg: SiteConfig) -> Site:
     return Site(encounters, mapping, adt, clifpy_source)
 
 
-def build_all(cfg: SiteConfig, dashboards: list[Dashboard]) -> dict[str, Path]:
-    """Build several dashboards from one stitching pass; returns each dashboard's output folder."""
+def build_all(cfg: SiteConfig, dashboards: list[Dashboard], skip_unavailable: bool = False) -> dict[str, Path]:
+    """Build several dashboards from one stitching pass; returns each dashboard's output folder.
+
+    A dashboard whose required tables are missing stops the build, unless
+    `skip_unavailable` (the site did not choose its dashboards), when it is skipped with a note.
+    """
+    available = []
     for dashboard in dashboards:
         missing = dashboard.missing_required_tables(cfg)
-        if missing:
+        if not missing:
+            available.append(dashboard)
+        elif skip_unavailable:
+            log(f"Skipping {dashboard.id}: required CLIF tables not found: {', '.join(p.name for p in missing)}")
+        else:
             raise FileNotFoundError(f"{dashboard.id}: required CLIF tables not found: {', '.join(map(str, missing))}")
+    dashboards = available
     site = stitch_site(cfg)
     return {d.id: build_dashboard(cfg.bind(d.id), d, site) for d in dashboards}
 

@@ -60,6 +60,33 @@ def days_present(intervals: pd.DataFrame, tz: str) -> pd.DataFrame:
     return expanded.drop_duplicates(DAY_KEY).reset_index(drop=True)
 
 
+def icu_time_per_day(intervals: pd.DataFrame, tz: str) -> pd.DataFrame:
+    """Hours spent in each unit on each local calendar day, per encounter (DAY_KEY + `hours`).
+
+    Each ICU row is clipped to the local days it touches, so a stay from 22:00 to 02:00
+    gives two hours to each day, and a daylight-saving day can hold 23 or 25 hours.
+    Overlapping rows in one unit are capped at the day's length.
+    """
+    if intervals.empty:
+        return pd.DataFrame(columns=DAY_KEY + ["hours"])
+    first = intervals["in_dttm"].dt.tz_convert(tz).dt.normalize().dt.tz_localize(None)
+    last = (intervals["out_dttm"] - ONE_MICROSECOND).dt.tz_convert(tz).dt.normalize().dt.tz_localize(None)
+    n_days = ((last - first).dt.days + 1).to_numpy()
+    expanded = intervals.loc[intervals.index.repeat(n_days)].reset_index(drop=True)
+    offsets = np.concatenate([np.arange(n) for n in n_days])
+    expanded["day"] = first.repeat(n_days).to_numpy() + pd.to_timedelta(offsets, unit="D")
+    local_midnight = lambda days: days.dt.tz_localize(tz, nonexistent="shift_forward", ambiguous=False).dt.tz_convert("UTC")
+    day_start = local_midnight(expanded["day"])
+    day_end = local_midnight(expanded["day"] + pd.Timedelta(days=1))
+    start = expanded["in_dttm"].where(expanded["in_dttm"] > day_start, day_start)
+    end = expanded["out_dttm"].where(expanded["out_dttm"] < day_end, day_end)
+    expanded["hours"] = (end - start).dt.total_seconds() / 3600
+    expanded["day_hours"] = (day_end - day_start).dt.total_seconds() / 3600
+    per_day = expanded.groupby(DAY_KEY).agg(hours=("hours", "sum"), day_hours=("day_hours", "first")).reset_index()
+    per_day["hours"] = per_day[["hours", "day_hours"]].min(axis=1)
+    return per_day[DAY_KEY + ["hours"]]
+
+
 def place_in_icu(events: pd.DataFrame, intervals: pd.DataFrame, time_column: str, tz: str) -> pd.DataFrame:
     """Events (with encounter_block and a UTC time) placed in the ICU row that contains them.
 
