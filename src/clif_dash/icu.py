@@ -18,6 +18,7 @@ from . import stage
 from .config import SiteConfig
 from .dashboard import SiteBuild
 from .upstream import clif_io, prep
+from .vocabulary import category_name_21
 
 DAY_KEY = ["encounter_block", "hospital", "unit", "day"]
 ONE_MICROSECOND = pd.Timedelta(microseconds=1)
@@ -269,7 +270,11 @@ def quoted(values) -> str:
 
 def outlier_bounds(table: str, value_column: str, category: str) -> tuple[float, float]:
     """clifpy's plausible range for one category's values (the platform's outliers decision)."""
-    rule = clif_io.outlier_config().get(table, {}).get(value_column, {}).get(category, {})
+    category_column = {"labs": "lab_category", "vitals": "vital_category",
+                       "patient_assessments": "assessment_category"}.get(table, "")
+    name = category_name_21(table, category_column, category).lower()
+    rules = {str(k).lower(): v for k, v in clif_io.outlier_config().get(table, {}).get(value_column, {}).items()}
+    rule = rules.get(name, {})
     return float(rule.get("min", -np.inf)), float(rule.get("max", np.inf))
 
 

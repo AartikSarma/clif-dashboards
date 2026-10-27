@@ -61,8 +61,9 @@ def shared_values(decisions: dict) -> dict:
 
 
 # The waterfall marks a row IMV only when it says so, or when it names no device and has an IMV mode
-# (clifpy waterfall step 1-a); later steps only carry IMV forward from such rows.
-IMV_MODES = "assist control-volume control|simv|pressure control"
+# (clifpy waterfall step 1-a); later steps only carry IMV forward from such rows. CLIF 3.0 names
+# two of the modes acvc and pressure_control.
+IMV_MODES = "assist control-volume control|acvc|simv|pressure control|pressure_control"
 
 
 def ventilated_blocks(con, cfg: SiteConfig, mapping: pd.DataFrame) -> set:
@@ -128,6 +129,13 @@ def data_quality(con, cfg: SiteConfig) -> dict:
             f"SELECT count(*) FROM {assessments} WHERE assessment_category = 'sat_delivery_pass_fail'") if assessments else 0,
         "sbt_documented_rows": scalar(
             f"SELECT count(*) FROM {assessments} WHERE assessment_category = 'sbt_delivery_pass_fail'") if assessments else 0,
+        # CLIF 3.0 values the 2.1 waterfall has no name for (src/clif_dash/vocabulary.py)
+        "respiratory_rows_clif30_only": {f"{column} {value}": int(n) for column, value, n in con.execute(f"""
+            SELECT 'device_category', lower(CAST(device_category AS VARCHAR)), count(*) FROM {path('respiratory_support')}
+            WHERE lower(CAST(device_category AS VARCHAR)) = 't_piece' GROUP BY 2
+            UNION ALL
+            SELECT 'mode_category', lower(CAST(mode_category AS VARCHAR)), count(*) FROM {path('respiratory_support')}
+            WHERE lower(CAST(mode_category AS VARCHAR)) IN ('aprv', 'avaps') GROUP BY 2""").fetchall()},
     }
 
 

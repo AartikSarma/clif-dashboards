@@ -38,8 +38,8 @@ shared:
 
   - id: glucose_categories
     label: Glucose results
-    value: [glucose_serum, glucose_fingerstick]
-    display: "labs rows with lab_category glucose_serum or glucose_fingerstick (point-of-care), in mg/dL, within clifpy's plausible range (0 to 2,000)"
+    value: [glucose_serum, glucose_fingerstick, glucose]
+    display: "labs rows with lab_category glucose_serum or point-of-care glucose (glucose_fingerstick in CLIF 2.1, glucose in 3.0), in mg/dL, within clifpy's plausible range (0 to 2,000)"
     alternatives: [Point-of-care only, Serum only]
     source: CLIF labs mCIDE
 

@@ -118,8 +118,8 @@ metrics:
     decisions:
       - id: pain_categories
         label: Pain scales
-        value: [NRS, VAS, cpot_total, BPS, PAINAD, NVPS, DVPRS]
-        display: "Any patient_assessments row with a value in NRS, VAS, CPOT (cpot_total), BPS, PAINAD, NVPS or DVPRS. PADIS recommends assessing pain routinely, with a self-report scale when the patient can and CPOT or BPS when not"
+        value: [NRS, VAS, cpot_total, cpot_intubated, BPS, PAINAD, NVPS, DVPRS]
+        display: "Any patient_assessments row with a value in NRS, VAS, CPOT (cpot_total, or CLIF 3.0's cpot_intubated), BPS, PAINAD, NVPS or DVPRS. PADIS recommends assessing pain routinely, with a self-report scale when the patient can and CPOT or BPS when not"
         alternatives: [Require ≥ 4 assessments a day]
         source: PADIS 2018; CLIF patient_assessments mCIDE
 

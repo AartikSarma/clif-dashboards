@@ -19,6 +19,7 @@ import duckdb
 import pandas as pd
 
 from .config import SiteConfig
+from .vocabulary import to_clif21
 
 # Small tables read whole for every dashboard; each dashboard declares the rest
 ENCOUNTER_TABLES = ("patient", "hospitalization", "adt")
@@ -53,7 +54,7 @@ def read_whole_table(cfg: SiteConfig, table: str) -> pd.DataFrame:
     path = cfg.table_path(table)
     if not path.exists():
         raise FileNotFoundError(f"Required CLIF table not found: {path}")
-    return clif_conventions(pd.read_parquet(path))
+    return to_clif21(table, clif_conventions(pd.read_parquet(path)))
 
 
 def stage_table(con, cfg: SiteConfig, table: str, chunk_map: pd.DataFrame, destination: Path,
@@ -108,4 +109,4 @@ def load_staged_chunk(cfg: SiteConfig, stage_name: str, table: str, chunk: int,
     frame = frame.sort_values(SOURCE_ROW, kind="stable").drop(columns=[SOURCE_ROW]).reset_index(drop=True)
     if "chunk" in frame.columns:
         frame = frame.drop(columns=["chunk"])
-    return clif_conventions(frame)
+    return to_clif21(table, clif_conventions(frame))

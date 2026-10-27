@@ -44,7 +44,7 @@ def write_site(folder: Path) -> Path:
         ("H1", "2024-01-10 13:00", "glucose_serum", 35),          # day 10: below 40 and 70
         ("H1", "2024-01-10 20:00", "glucose_fingerstick", 150),   # day 10 mean 92.5: in range
         ("H1", "2024-01-11 08:00", "glucose_serum", 320),         # day 11: above 300
-        ("H1", "2024-01-11 10:00", "glucose_fingerstick", 200),   # day 11 mean 260: out of range
+        ("H1", "2024-01-11 10:00", "glucose", 200),               # CLIF 3.0 point-of-care; day 11 mean 260: out of range
         ("H1", "2024-01-11 12:00", "glucose_fingerstick", 2500),  # outside clifpy's range: not counted
         ("H1", "2024-01-12 10:00", "glucose_serum", 30),          # after the ICU: not counted
         ("H1", "2024-01-11 09:00", "sodium", 20),                 # not glucose

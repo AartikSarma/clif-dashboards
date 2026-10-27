@@ -11,7 +11,7 @@ ICU quality-improvement dashboards computed from a site's own [CLIF](https://cli
 - **ICU Liberation**: the ABCDEF bundle per ICU day: pain assessment, documented SAT and SBT, sedation assessment and depth, sedative and benzodiazepine infusions, and delirium screening and positivity.
 - **Kidney**: acute kidney injury arising in the ICU (KDIGO creatinine criteria), creatinine monitoring, CRRT days and CRRT effluent dose.
 
-Fluids uses CLIF 3.0's `input` table and its categories; the others use CLIF 2.1 tables. fluids uses CLIF 3.0's `input` table and its categories. With no `dashboards:` line in the site config, the build makes every dashboard whose tables the site has and skips the rest.
+Fluids needs CLIF 3.0's `input` table. The others run on CLIF 2.1 or 3.0 tables: 3.0 renamed category values (`IMV` became `imv`, `Assist Control-Volume Control` became `acvc`, `Expired` became `expired`), and the build reads them back as their 2.1 equivalents using clifpy's own crosswalk, so a site gets the same numbers in either version. fluids uses CLIF 3.0's `input` table and its categories. With no `dashboards:` line in the site config, the build makes every dashboard whose tables the site has and skips the rest.
 
 Everything runs on one machine inside your institution: a batch build reads your CLIF tables and writes the measures, and a local web server shows them. Nothing is sent anywhere. The build is designed for large sites; at UCSF it handles more than 80,000 ICU admissions.
 
@@ -182,6 +182,7 @@ The build links hospitalizations into encounters across the site, then hands the
 ## Known limits
 
 - Only parquet tables are supported.
+- A few CLIF 3.0 values have no 2.1 equivalent and are kept as they are. The one that matters is the respiratory_support device `t_piece`: the ventilator waterfall does not treat it as IMV, so a T-piece trial charted with that device ends an IMV episode. The respiratory data-quality page counts such rows.
 - Each build recomputes every encounter; incremental refresh is not built yet.
 - The synthetic data has no documented SAT or SBT assessments, no paralytic or benzodiazepine infusions, no CPOT or BPS pain scores, no point-of-care glucose and none below 40 or above 300 mg/dL, creatinine that varies at random from day to day (so AKI is far too common), one patient who meets the proning criteria, and four antibiotics. Those parts are checked only on paper or by hand-built tests until a site runs them on real data.
 - The stewardship measures follow NHSN's counting rules but are not SAARs: there are no NHSN predicted values, so compare within your site, not against national benchmarks.
