@@ -67,3 +67,56 @@ def test_the_build_log_works_without_the_resource_module(monkeypatch, capsys):
     dashboard.log("Phase A")
     line = capsys.readouterr().out
     assert line.endswith("] Phase A\n") and "peak" not in line
+
+
+def test_workers_are_spawned_not_forked(monkeypatch):
+    """Linux forks by default, and a forked worker hangs in its first polars call (clifpy's
+    Charlson index): it inherits the parent's thread pool without its threads."""
+    from clif_dash import dashboard
+
+    seen = {}
+
+    class Recorder:
+        def __init__(self, max_workers, mp_context=None):
+            seen["method"] = mp_context.get_start_method() if mp_context else None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def map(self, function, *iterables):
+            return map(function, *iterables)
+
+    monkeypatch.setattr(dashboard, "ProcessPoolExecutor", Recorder)
+    cfg = type("Config", (), {"workers": 2})()
+    site = dashboard.SiteBuild(cfg=cfg, con=None, encounters=None, mapping=None, adt=None, site_statistics={})
+    assert site.run_chunks(lambda cfg, chunk, statistics: chunk, [0, 1]) == [0, 1]
+    assert seen["method"] == "spawn"
+
+
+def test_the_charlson_step_writes_a_log_and_dumps_stacks_when_it_stalls(tmp_path, monkeypatch):
+    """Each chunk's Charlson step is logged; if it stalls, the worker appends its thread stacks."""
+    import time
+
+    from clif_dash.config import load_config
+    from clif_dash.dashboards.respiratory import build as respiratory
+
+    (tmp_path / "site.yaml").write_text(f"clif_dir: {tmp_path}\noutput_dir: {tmp_path / 'out'}\n")
+    cfg = load_config(tmp_path / "site.yaml").bind("respiratory")
+    diagnoses = pd.DataFrame({"hospitalization_id": ["a", "a", "b"], "diagnosis_code": ["I50.9", "E11.9", "J18.9"],
+                              "diagnosis_code_format": ["ICD10CM"] * 3})
+    scored = respiratory.charlson_with_log(cfg, 7, diagnoses)
+    assert set(scored["hospitalization_id"]) == {"a", "b"}
+    log = (cfg.stage_dir / "logs" / "cci_chunk_7.log").read_text()
+    assert "start method" in log and "3 diagnosis rows, 2 hospitalizations" in log and "finished" in log
+    assert "I50" not in log                    # counts and versions only, never codes
+
+    def slow(hospital_diagnosis, log):
+        time.sleep(2.5)
+        return pd.DataFrame(columns=["hospitalization_id", "cci_score"])
+    monkeypatch.setattr(respiratory, "CCI_STACK_DUMP_SECONDS", 1)
+    monkeypatch.setattr(respiratory.clif_io, "charlson", slow)
+    respiratory.charlson_with_log(cfg, 8, diagnoses)
+    assert "Thread" in (cfg.stage_dir / "logs" / "cci_chunk_8.log").read_text()

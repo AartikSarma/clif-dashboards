@@ -19,6 +19,13 @@ single-process upstream build, which tests/test_oracle.py checks.
 """
 from __future__ import annotations
 
+import faulthandler
+import multiprocessing
+import os
+import sys
+import time
+from importlib.metadata import PackageNotFoundError, version
+
 import numpy as np
 import pandas as pd
 
@@ -209,7 +216,7 @@ def phase_b_chunk(cfg: SiteConfig, chunk: int, statistics: dict) -> dict:
     outliers = clif_io.apply_outliers(tables, log=lambda m: None,
                                       fio2_percent=statistics["fio2_recorded_as_percent"])
     hospital_diagnosis = tables.pop("hospital_diagnosis")
-    charlson = clif_io.charlson(hospital_diagnosis if not hospital_diagnosis.empty else None)
+    charlson = charlson_with_log(cfg, chunk, hospital_diagnosis)
 
     context = dict(T=tables, enc=encounters, mapping=mapping, adt=adt, w=waterfall, runs=runs, ep=episodes,
                    cci=charlson)
@@ -230,6 +237,52 @@ def phase_b_chunk(cfg: SiteConfig, chunk: int, statistics: dict) -> dict:
     return {"chunk": chunk, "episodes": episode_metrics, "proning": proning_rows,
             "proning_funnel": proning_funnel, "paralytic_days": paralytic_days, "outliers": outliers,
             "ltvv_thresholds": context["ltvv_thresholds"]}
+
+
+CCI_STACK_DUMP_SECONDS = 120
+
+
+def charlson_with_log(cfg: SiteConfig, chunk: int, hospital_diagnosis: pd.DataFrame) -> pd.DataFrame:
+    """The Charlson index for one chunk, logged step by step to stage/logs/cci_chunk_<n>.log.
+
+    The log holds counts and versions only, no IDs or codes. If the step stalls, every
+    CCI_STACK_DUMP_SECONDS the worker appends the Python stack of each of its threads,
+    which shows where it waits.
+    """
+    folder = cfg.stage_dir / "logs"
+    folder.mkdir(parents=True, exist_ok=True)
+    with open(folder / f"cci_chunk_{chunk}.log", "a", buffering=1) as handle:
+        def note(message: str) -> None:
+            line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} chunk {chunk} pid {os.getpid()} | {message}"
+            handle.write(line + "\n")
+            print(f"[CCI] {line}", flush=True)
+
+        note(f"start method {multiprocessing.get_start_method(allow_none=True)}; "
+             f"python {sys.version.split()[0]}; {package_versions('clifpy', 'polars', 'pandas', 'pyarrow')}")
+        if hospital_diagnosis.empty:
+            note("no hospital_diagnosis rows for this chunk")
+        else:
+            formats = hospital_diagnosis.get("diagnosis_code_format", pd.Series(dtype=str)).astype(str).str.lower()
+            note(f"{len(hospital_diagnosis):,} diagnosis rows, "
+                 f"{hospital_diagnosis['hospitalization_id'].nunique():,} hospitalizations; "
+                 f"code formats {formats.value_counts().to_dict()}")
+        faulthandler.dump_traceback_later(CCI_STACK_DUMP_SECONDS, repeat=True, file=handle)
+        started = time.time()
+        try:
+            result = clif_io.charlson(hospital_diagnosis if not hospital_diagnosis.empty else None, log=note)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+        note(f"done in {time.time() - started:.1f} s")
+    return result
+
+
+def package_versions(*names: str) -> str:
+    def one(name):
+        try:
+            return f"{name} {version(name)}"
+        except PackageNotFoundError:
+            return f"{name} not installed"
+    return ", ".join(one(name) for name in names)
 
 
 def sum_outliers(results: list[dict]) -> dict:

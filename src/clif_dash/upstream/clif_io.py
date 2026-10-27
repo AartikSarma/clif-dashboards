@@ -166,13 +166,20 @@ def apply_outliers(tables: dict[str, pd.DataFrame], log=print, fio2_percent: boo
     return summary
 
 
-def charlson(hospital_diagnosis: pd.DataFrame) -> pd.DataFrame:
-    """Charlson index (Quan 2011), same logic and YAML as clifpy.calculate_cci."""
+def charlson(hospital_diagnosis: pd.DataFrame, log=lambda message: None) -> pd.DataFrame:
+    """Charlson index (Quan 2011), same logic and YAML as clifpy.calculate_cci.
+
+    clif_dashboards: `log` reports each step and why the vendored fallback ran, which
+    the original swallowed silently.
+    """
     try:
         from clifpy.utils.comorbidity import calculate_cci
-        return calculate_cci(hospital_diagnosis)[["hospitalization_id", "cci_score"]]
-    except Exception:
-        pass
+        log("clifpy calculate_cci: started")
+        result = calculate_cci(hospital_diagnosis)[["hospitalization_id", "cci_score"]]
+        log(f"clifpy calculate_cci: finished, {len(result):,} hospitalizations scored")
+        return result
+    except Exception as error:
+        log(f"clifpy calculate_cci failed ({type(error).__name__}: {error}); using the vendored implementation")
     if hospital_diagnosis is None or hospital_diagnosis.empty:
         return pd.DataFrame(columns=["hospitalization_id", "cci_score"])
     cfg = yaml.safe_load((VENDOR / "cci.yaml").read_text())
@@ -188,4 +195,5 @@ def charlson(hospital_diagnosis: pd.DataFrame) -> pd.DataFrame:
             for mild in lst[1:]:
                 g.loc[g[lst[0]] == 1, mild] = 0
     g["cci_score"] = sum(g[c] * w for c, w in cfg["weights"].items() if c in g)
+    log(f"vendored Charlson index: finished, {len(g):,} hospitalizations scored")
     return g.reset_index()[["hospitalization_id", "cci_score"]]

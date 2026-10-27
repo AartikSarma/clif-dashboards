@@ -8,6 +8,7 @@ server aggregates from them. The platform calls the module only through it.
 """
 from __future__ import annotations
 
+import multiprocessing
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -96,11 +97,16 @@ class SiteBuild:
         Workers are spawned, so chunk_function must be a module-level function.
         Any statistic over a whole table belongs in site_statistics, never in a
         chunk: a chunk sees only its own encounters.
+
+        Spawned on every platform, not forked: Linux forks by default, and a forked
+        worker inherits the parent's polars, Arrow and DuckDB thread pools without
+        their threads, so its first parallel call (clifpy's Charlson index, in
+        polars) waits forever.
         """
         cfg, statistics = self.cfg, self.site_statistics
         if cfg.workers <= 1:
             return [chunk_function(cfg, c, statistics) for c in chunks]
-        with ProcessPoolExecutor(max_workers=cfg.workers) as pool:
+        with ProcessPoolExecutor(max_workers=cfg.workers, mp_context=multiprocessing.get_context("spawn")) as pool:
             return list(pool.map(chunk_function, [cfg] * len(chunks), chunks, [statistics] * len(chunks)))
 
 
