@@ -51,9 +51,18 @@ EPISODE_COLUMNS = [
     "sbt_num", "sbt_doc", "sbt_pheno", "sbt_den",
     "vfd28", "imv_days", "ext_den", "reint_num", "rass_num", "rass_den", "rass_median", "deep_num", "deep_den",
     "died", "mort_expected", "icu_los", "hosp_los", "trach_any", "readmit_num", "readmit_den", "outcome_den",
-    "discharge",
+    "discharge", "first_extubation",
 ]
 COMPLETENESS_FLAGS = ["has_abg", "has_height", "has_weight", "has_plateau", "has_rass", "has_vt"]
+
+
+def first_extubations(runs: pd.DataFrame) -> pd.Series:
+    """Each episode's first extubation, for the time-of-day heatmap: the end of its first IMV run that
+    ended in a move to another device other than a trach collar (the reintubation measure's
+    extubation, without its exclusions for death and comfort care). Indexed by episode_id."""
+    extubated = runs[runs["ended_by_device_change"].fillna(False).astype(bool)
+                     & ~runs["next_device"].astype(str).str.lower().eq("trach collar")]
+    return extubated.groupby("episode_id")["run_end"].min()
 
 
 def shared_values(decisions: dict) -> dict:
@@ -396,6 +405,7 @@ def build(site: SiteBuild) -> BuildResult:
     episode_metrics["month"] = episode_metrics["start"].dt.tz_convert(tz).dt.strftime("%Y-%m")
     episode_metrics["label_id"] = blocks.map(encounter_index["hospitalization_id"])
     episode_metrics["discharge"] = blocks.map(encounter_index["discharge_category"]).fillna("Missing")
+    episode_metrics["first_extubation"] = episode_metrics["episode_id"].map(first_extubations(runs))
     episode_metrics["trach"] = episode_metrics["trach"].astype(bool)
     episode_metrics["has_height"] = episode_metrics["height_cm"].notna()
     episode_metrics["has_plateau"] = episode_metrics["plat_den"] > 0

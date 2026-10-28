@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { scaleLinear } from "d3-scale";
 import { line as d3line, curveStepAfter } from "d3-shape";
 import { fmt, status, statusLabel } from "./format.js";
-import { Sparkline, RunChart, BarBreakdown, StrataLines, Funnel, Lane, useWidth, monthLabel } from "./charts.jsx";
+import { Sparkline, RunChart, BarBreakdown, StrataLines, Funnel, Lane, HourMonthHeatmap, useWidth, monthLabel } from "./charts.jsx";
 import "./styles.css";
 
 let DASH = null; // id of the dashboard on screen
@@ -823,6 +823,43 @@ function Timeline({ F, arg }) {
 }
 
 // ----------------------------------------------------------------------------
+// Time of day: when events happen, by hour (rows) and month (columns)
+// ----------------------------------------------------------------------------
+function HeatmapCard({ heatmap, F, share }) {
+  const state = useApi(`${api(`/heatmap/${heatmap.id}`)}${query(F)}`);
+  return (
+    <section className="card">
+      <div className="card-head"><h2>{heatmap.title}</h2></div>
+      {heatmap.note && <p className="muted">{heatmap.note}</p>}
+      <Loading state={state}>{(data) => data.n
+        ? <HourMonthHeatmap data={data} share={share} event={heatmap.event} />
+        : <p className="empty">No {heatmap.event} under the current filters.</p>}</Loading>
+    </section>
+  );
+}
+
+function TimeOfDay({ F }) {
+  const [share, setShare] = useState(true);
+  return (
+    <div>
+      <div className="page-head">
+        <h1>Time of day</h1>
+        <p className="lede">Each column is a month and each row an hour of the day, in site time. "% of month" shows what share
+          of that month's events fell in each hour, so busy and quiet months compare fairly; "Count" shows the numbers.
+          The bars on the right add up every month shown.</p>
+      </div>
+      <div className="seg" style={{ marginBottom: 12 }}>
+        <div className="toggle" role="tablist">
+          <button className={share ? "on" : ""} onClick={() => setShare(true)}>% of month</button>
+          <button className={share ? "" : "on"} onClick={() => setShare(false)}>Count</button>
+        </div>
+      </div>
+      {META.heatmaps.map((h) => <HeatmapCard key={h.id} heatmap={h} F={F} share={share} />)}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
 // Data quality
 // ----------------------------------------------------------------------------
 function Quality({ F }) {
@@ -940,7 +977,8 @@ function App({ dashboards }) {
   useEffect(() => { if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme; }, [theme]);
   const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"],
     ...((META.filter_options.hospital || []).length > 1 ? [["hospitals", "Hospital comparison"]] : []), ["patients", cap(PRIMARY.unit_plural)],
-    ...(detailView() ? [["timeline", detailView().label]] : []), ["quality", "Data quality"]];
+    ...(detailView() ? [["timeline", detailView().label]] : []),
+    ...((META.heatmaps || []).length ? [["timeofday", "Time of day"]] : []), ["quality", "Data quality"]];
   const firstMetric = METRICS[0].id;
   return (
     <div className="shell viz-root">
@@ -973,6 +1011,7 @@ function App({ dashboards }) {
           {(route_.page === "units" || route_.page === "hospitals") && <Comparison F={F} by={route_.page} key={route_.page} />}
           {route_.page === "patients" && <Patients F={F} arg={route_.arg} />}
           {route_.page === "timeline" && detailView() && detailView().view({ F, arg: route_.arg })}
+          {route_.page === "timeofday" && (META.heatmaps || []).length > 0 && <TimeOfDay F={F} />}
           {route_.page === "quality" && <Quality F={F} />}
         </main>
       </div>

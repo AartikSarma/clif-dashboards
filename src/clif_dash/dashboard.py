@@ -208,6 +208,25 @@ class RowTable:
 
 
 @dataclass(frozen=True)
+class Heatmap:
+    """How a timed event spreads over the day: counts by hour (rows) and month (columns), in site time.
+
+    Each row of `source` with a time in `time_column` is one event, placed by the hour and
+    month of that time; with `where`, only rows whose `where` column is true or non-zero count.
+    """
+    id: str
+    title: str
+    source: str                  # which row table (RowTable.name)
+    time_column: str             # a time-zone-aware column of that table
+    event: str                   # what one event is, plural: "ICU admissions"
+    where: str | None = None
+    note: str = ""
+
+    def public(self) -> dict:
+        return {"id": self.id, "title": self.title, "event": self.event, "note": self.note}
+
+
+@dataclass(frozen=True)
 class FilterField:
     """A filter in the left rail, applied to every row table that has the column."""
     column: str
@@ -241,6 +260,7 @@ class Dashboard:
     completeness: list[tuple[str, str]]
     independent_denominators: frozenset[str]             # denominators that get p-chart limits
     detail: Callable | None = None                       # (store) -> builder with .build(row_id)
+    heatmaps: tuple[Heatmap, ...] = ()                   # time-of-day patterns, on the Time of day page
 
     @property
     def metrics_by_id(self) -> dict[str, Metric]:

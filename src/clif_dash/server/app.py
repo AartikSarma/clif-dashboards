@@ -104,6 +104,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "completeness": [list(c) for c in completeness_flags],
             "filter_fields": [f.public() for f in filter_fields], "filter_options": store.filter_options(),
             "n_total": int(len(store.primary_rows)),
+            "heatmaps": [h.public() for h in dashboard.heatmaps],
         })
 
     @router.get("/overview")
@@ -257,6 +258,15 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "previous": ids.iloc[position - 1] if position > 0 else None,
             "next": ids.iloc[position + 1] if position + 1 < len(ids) else None,
         })
+
+    @router.get("/heatmap/{heatmap_id}")
+    def heatmap(heatmap_id: str, request: Request):
+        chosen = next((h for h in dashboard.heatmaps if h.id == heatmap_id), None)
+        if chosen is None:
+            raise HTTPException(404, f"no heatmap {heatmap_id}")
+        rows = filtered(request)[chosen.source]
+        return jsonable({"heatmap": chosen.public(), **agg.hour_by_month(rows, chosen.time_column, cfg.site_timezone,
+                                                                         chosen.where)})
 
     @router.get("/quality")
     def quality(request: Request):

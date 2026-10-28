@@ -150,6 +150,7 @@ def build(site: SiteBuild) -> BuildResult:
         "icu_admission": flow["icu_in"],
         "icu_days": blocks.map(icu_days).round(2),
         "transferred_out": transferred.astype(int),
+        "transfer_out_time": flow["transfer_out"],
         "readmitted_48h": (transferred & flow["readmitted"].eq(True)).astype(int),
         "night_transfer_out": (transferred & night_hours(flow["transfer_out"], tz, night["start_hour"],
                                                          night["end_hour"])).astype(int),

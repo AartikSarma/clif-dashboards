@@ -1,7 +1,7 @@
 """Microbiology: diagnostic stewardship, hospital-onset infections and resistance, by ICU."""
 from __future__ import annotations
 
-from ...dashboard import Dashboard, Metric, RowTable
+from ...dashboard import Dashboard, Heatmap, Metric, RowTable
 from . import build
 
 STAY_MONTHS = RowTable("stay_months", "row_id", "ICU stay-month", "ICU stay-months")
@@ -52,4 +52,6 @@ MICROBIOLOGY = Dashboard(
     # Cultures cluster within patients, so rates per day present get no limits; draws, starts and isolates do
     independent_denominators=frozenset({"blood culture draws", "antibacterial starts", "S. aureus isolates",
                                         "Enterobacterales isolates", "gram-negative isolates"}),
+    heatmaps=(Heatmap("antibiotic_start", "New antibacterial start", "antibiotic_starts", "start_time",
+                      "antibacterial starts", note="The first dose of each new antibacterial start in the ICU."),),
 )

@@ -146,3 +146,6 @@ def test_every_measure_page_of_every_dashboard_answers(built):
                 assert response.json()["agg"]["value"] is not None, (dashboard.id, metric.id)
         for page in ("overview", "units", "quality", "rows"):
             assert every.get(f"/api/{dashboard.id}/{page}").status_code == 200, (dashboard.id, page)
+        for heatmap in dashboard.heatmaps:
+            response = every.get(f"/api/{dashboard.id}/heatmap/{heatmap.id}").json()
+            assert response["n"] == sum(response["totals"]) > 0, (dashboard.id, heatmap.id)

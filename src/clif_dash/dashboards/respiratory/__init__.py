@@ -1,7 +1,7 @@
 """Respiratory failure on invasive ventilation: upstream's ICU quality dashboard."""
 from __future__ import annotations
 
-from ...dashboard import Dashboard, FilterField, RowTable
+from ...dashboard import Dashboard, FilterField, Heatmap, RowTable
 from . import build, registry
 from .timeline import TimelineBuilder
 
@@ -23,4 +23,9 @@ RESPIRATORY = Dashboard(
     completeness=registry.COMPLETENESS,
     independent_denominators=registry.INDEPENDENT_DENOMINATORS,
     detail=TimelineBuilder,
+    heatmaps=(Heatmap("intubation", "Intubation", "episodes", "start", "intubations",
+                      note="The start of each IMV episode."),
+              Heatmap("extubation", "Extubation", "episodes", "first_extubation", "extubations",
+                      note="Each episode's first extubation: the end of an IMV run followed by another device "
+                           "other than a trach collar. Deaths and comfort-care extubations are included.")),
 )

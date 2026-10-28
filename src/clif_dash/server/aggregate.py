@@ -64,6 +64,28 @@ def aggregate(metric: Metric, rows: pd.DataFrame) -> dict:
             "q3": _finite(quartiles[2])}
 
 
+def hour_by_month(rows: pd.DataFrame, time_column: str, tz: str, where: str | None = None) -> dict:
+    """Events by local hour of day (24 rows) and month (columns, every month from the first to the last).
+
+    Each row with a time in `time_column` is one event; with `where`, only rows whose
+    `where` column is true or non-zero count. Events in months after the rows' last month
+    (a transfer out in January for a November admission at the end of the data) are left
+    out, so a sparse trailing month does not appear.
+    """
+    if where is not None and len(rows):
+        rows = rows[rows[where].fillna(0).astype(bool)]
+    times = rows[time_column].dropna().dt.tz_convert(tz) if len(rows) else pd.Series(dtype="datetime64[ns, UTC]")
+    if len(times) and "month" in rows.columns and rows["month"].notna().any():
+        times = times[times.dt.strftime("%Y-%m") <= rows["month"].max()]
+    if not len(times):
+        return {"months": [], "hours": list(range(24)), "counts": [[] for _ in range(24)], "totals": [], "n": 0}
+    months = pd.period_range(times.min().strftime("%Y-%m"), times.max().strftime("%Y-%m"), freq="M").strftime("%Y-%m")
+    table = (pd.crosstab(times.dt.hour, times.dt.strftime("%Y-%m"))
+             .reindex(index=range(24), columns=list(months), fill_value=0))
+    return {"months": list(months), "hours": list(range(24)), "counts": table.to_numpy().astype(int).tolist(),
+            "totals": table.sum(axis=0).astype(int).tolist(), "n": int(table.to_numpy().sum())}
+
+
 def _int_if_whole(value: float):
     return int(value) if float(value).is_integer() else value
 

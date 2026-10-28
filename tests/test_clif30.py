@@ -46,7 +46,7 @@ def test_funnels_and_rows_match_upstream(built_clif30):
     cfg, output, summary = built_clif30
     assert summary["funnel"] == ORACLE["funnel"]
     assert summary["proning_funnel"] == ORACLE["proning_funnel"]
-    episodes = pd.read_parquet(output / "episodes.parquet").drop(columns=["encounter_block"])
+    episodes = pd.read_parquet(output / "episodes.parquet").drop(columns=["encounter_block", "first_extubation"])
     episodes["start"] = local_minutes(episodes["start"], cfg.site_timezone)
     episodes["end"] = local_minutes(episodes["end"], cfg.site_timezone)
     assert_records_match({r["episode_id"]: r for r in upstream_clean(episodes.to_dict("records"))},

@@ -1,7 +1,7 @@
 """ICU flow: readmission, length of stay, night transfers, ED-to-ICU time and where ICU stays end, from ADT."""
 from __future__ import annotations
 
-from ...dashboard import Dashboard, Metric, RowTable
+from ...dashboard import Dashboard, Heatmap, Metric, RowTable
 from . import build
 
 ENCOUNTERS = RowTable("encounters", "row_id", "ICU encounter", "ICU encounters")
@@ -48,4 +48,9 @@ FLOW = Dashboard(
     completeness=[],
     # One row per encounter, so encounters and their transfers out are independent enough for p-chart limits
     independent_denominators=frozenset({"ICU encounters", "transfers out of the ICU"}),
+    heatmaps=(Heatmap("icu_admission", "ICU admission", "encounters", "icu_admission", "ICU admissions",
+                      note="The first ICU ADT row of each encounter."),
+              Heatmap("transfer_out", "Transfer out of the ICU", "encounters", "transfer_out_time",
+                      "transfers out", where="transferred_out",
+                      note="Each encounter's first transfer from an ICU to a non-ICU location, alive.")),
 )

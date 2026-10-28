@@ -7,11 +7,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import yaml
+from fastapi.testclient import TestClient
 
 from clif_dash.build import build
 from clif_dash.config import load_config
 from clif_dash.dashboards import FLOW
+from clif_dash.server.app import create_app
 
 REPO = Path(__file__).resolve().parent.parent
 TZ = "America/Los_Angeles"
@@ -85,10 +88,29 @@ EXPECTED = {
 }
 
 
-def test_each_encounter(tmp_path):
-    output = build(load_config(write_site(tmp_path)), FLOW)
+@pytest.fixture(scope="module")
+def built_site(tmp_path_factory):
+    cfg = load_config(write_site(tmp_path_factory.mktemp("flow_site")))
+    return cfg, build(cfg, FLOW)
+
+
+def test_each_encounter(built_site):
+    _, output = built_site
     rows = pd.read_parquet(output / "encounters.parquet").set_index("label_id")
     assert sorted(rows.index) == sorted(EXPECTED)            # the child (H4) makes no row
     for key, expected in EXPECTED.items():
         values = [None if pd.isna(v) else v for v in rows.loc[key, COLUMNS].tolist()]
         assert values == expected, key
+
+
+def test_heatmaps_count_events_by_local_hour_and_month(built_site):
+    cfg, _ = built_site
+    client = TestClient(create_app(cfg, [FLOW]))
+    assert [h["id"] for h in client.get("/api/flow/meta").json()["heatmaps"]] == ["icu_admission", "transfer_out"]
+    admissions = client.get("/api/flow/heatmap/icu_admission").json()
+    # H1 14:00, H2 08:00, H3 08:00, H5 23:00 on Jan 31 local (Feb 1 in UTC): every one in January
+    assert admissions["months"] == ["2024-01"] and admissions["totals"] == [4]
+    assert {h: row[0] for h, row in enumerate(admissions["counts"]) if row[0]} == {8: 2, 14: 1, 23: 1}
+    transfers = client.get("/api/flow/heatmap/transfer_out").json()   # H1 at 23:30, H2 at 15:00
+    assert {h: row[0] for h, row in enumerate(transfers["counts"]) if row[0]} == {15: 1, 23: 1}
+    assert client.get("/api/flow/heatmap/nothing").status_code == 404

@@ -69,7 +69,8 @@ def test_funnels_match(built):
 
 def test_episode_rows_match(built):
     cfg, output, _ = built
-    episodes = pd.read_parquet(output / "episodes.parquet").drop(columns=["encounter_block"])
+    # first_extubation is ours, for the time-of-day heatmap; upstream has no such column
+    episodes = pd.read_parquet(output / "episodes.parquet").drop(columns=["encounter_block", "first_extubation"])
     episodes["start"] = local_minutes(episodes["start"], cfg.site_timezone)
     episodes["end"] = local_minutes(episodes["end"], cfg.site_timezone)
     ours = {r["episode_id"]: r for r in upstream_clean(episodes.to_dict("records"))}

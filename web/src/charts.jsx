@@ -295,3 +295,82 @@ export function Lane({ title, x, w, height = 70, children, yTicks, y, unit }) {
     </div>
   );
 }
+
+// Viridis, sampled at nine even stops (matplotlib), for continuous values
+const VIRIDIS = ["#440154", "#472d7b", "#3b528b", "#2c728e", "#21918c", "#28ae80", "#5ec962", "#addc30", "#fde725"];
+export function viridis(t) {
+  const x = Math.min(1, Math.max(0, t)) * (VIRIDIS.length - 1);
+  const i = Math.min(VIRIDIS.length - 2, Math.floor(x));
+  const mix = (a, b) => Math.round(a + (b - a) * (x - i));
+  const rgb = (hex) => [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16));
+  const [a, b] = [rgb(VIRIDIS[i]), rgb(VIRIDIS[i + 1])];
+  return `rgb(${mix(a[0], b[0])}, ${mix(a[1], b[1])}, ${mix(a[2], b[2])})`;
+}
+
+const hourLabel = (h) => `${String(h).padStart(2, "0")}:00`;
+
+/** Events by hour of day (rows) and month (columns). `share`: each cell as a percent of its month's events.
+    The bars on the right are each hour's share of all events shown. */
+export function HourMonthHeatmap({ data, share, event }) {
+  const [ref, w] = useWidth();
+  const [hover, setHover] = useState(null);
+  const { months, counts, totals, n } = data;
+  const m = { t: 20, r: 70, b: 30, l: 46 };
+  const cell = 13;
+  const iw = Math.max(40, w - m.l - m.r), ih = cell * 24, height = ih + m.t + m.b;
+  const x = scaleBand().domain(months).range([0, iw]);
+  const value = (h, j) => (share ? (totals[j] ? (100 * counts[h][j]) / totals[j] : null) : counts[h][j]);
+  // The top of the colour scale is the 98th percentile of the cells, so a few sparse months cannot wash out the rest
+  const cells = counts.flatMap((row, h) => row.map((_, j) => value(h, j))).filter((v) => v != null).sort((a, b) => a - b);
+  const max = cells.length ? cells[Math.min(cells.length - 1, Math.floor(0.98 * (cells.length - 1)))] || cells[cells.length - 1] : 0;
+  const capped = cells.length && max < cells[cells.length - 1];
+  const hourTotals = counts.map((row) => row.reduce((a, b) => a + b, 0));
+  const hourMax = Math.max(1, ...hourTotals);
+  const step = Math.ceil(months.length / Math.max(1, Math.floor(iw / 64)));
+  const fmtValue = (v) => (v == null ? "—" : share ? `${v.toFixed(1)}%` : v.toLocaleString());
+  const onMove = (ev) => {
+    const r = ev.currentTarget.getBoundingClientRect();
+    const px = ev.clientX - r.left - m.l, py = ev.clientY - r.top - m.t;
+    const j = Math.floor(px / x.step()), h = Math.floor(py / cell);
+    setHover(j >= 0 && j < months.length && h >= 0 && h < 24 ? { h, j, x: ev.clientX - r.left, y: ev.clientY - r.top } : null);
+  };
+  return (
+    <div ref={ref} className="viz-wrap" style={{ height: height + 34 }}>
+      <svg width={w} height={height} role="img" aria-label={`${event} by hour of day and month`} onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}>
+        <g transform={`translate(${m.l},${m.t})`}>
+          {counts.map((row, h) => row.map((_, j) => {
+            const v = value(h, j);
+            return <rect key={`${h}-${j}`} x={x(months[j])} y={h * cell} width={Math.max(1, x.bandwidth() - 0.5)}
+              height={cell - 0.5} fill={v == null ? "var(--surface-2)" : viridis(max ? v / max : 0)} />;
+          }))}
+          {[0, 3, 6, 9, 12, 15, 18, 21].map((h) => (
+            <text key={h} x={-6} y={h * cell + cell / 2} dy="0.32em" textAnchor="end" className="tick">{hourLabel(h)}</text>
+          ))}
+          {months.map((mo, j) => j % step === 0 && (
+            <text key={mo} x={x(mo) + x.bandwidth() / 2} y={ih + 18} textAnchor="middle" className="tick">{monthLabel(mo)}</text>
+          ))}
+          {hourTotals.map((t, h) => (
+            <rect key={h} x={iw + 8} y={h * cell + 1} height={cell - 2} width={(52 * t) / hourMax} className="hour-bar" />
+          ))}
+          <text x={iw + 8} y={-8} className="tick">All months</text>
+          {hover && <rect x={x(months[hover.j])} y={hover.h * cell} width={x.bandwidth()} height={cell} className="cell-focus" />}
+        </g>
+      </svg>
+      <div className="heat-legend">
+        <span>{share ? "0%" : "0"}</span>
+        <i style={{ background: `linear-gradient(to right, ${VIRIDIS.join(", ")})` }} />
+        <span>{capped ? "≥ " : ""}{fmtValue(max)}{share ? " of the month" : ` ${event}`}</span>
+        <span className="muted">{n.toLocaleString()} {event} in all</span>
+      </div>
+      {hover && (
+        <Tooltip x={hover.x} y={hover.y} w={w}>
+          <b>{monthLabel(months[hover.j])} · {hourLabel(hover.h)}–{String(hover.h).padStart(2, "0")}:59</b>
+          <div>{counts[hover.h][hover.j].toLocaleString()} {event}
+            {totals[hover.j] ? ` · ${((100 * counts[hover.h][hover.j]) / totals[hover.j]).toFixed(1)}% of ${totals[hover.j].toLocaleString()} that month` : ""}</div>
+          <div className="muted">This hour, all months: {hourTotals[hover.h].toLocaleString()} ({n ? ((100 * hourTotals[hover.h]) / n).toFixed(1) : 0}%)</div>
+        </Tooltip>
+      )}
+    </div>
+  );
+}

@@ -157,6 +157,8 @@ Other `Metric` fields:
 - `needs`: completeness flags (from `completeness`) this measure depends on.
 - `variants`: for a measure computed at several thresholds, chosen in the URL as `<id>@<value>`; see respiratory's LTVV.
 
+`heatmaps` adds a **Time of day** page: each `Heatmap(id, title, source, time_column, event, where=None, note="")` counts the rows of a table by the local hour (rows) and month (columns) of a time-zone-aware column, with `where` naming a column that must be true for a row to count. The flow dashboard's ICU admissions and transfers out are the example.
+
 `independent_denominators` lists the `den_label`s whose units are independent enough for control limits (a p-chart for ratios, a u-chart for rates). Leave out anything clustered within patients, such as patient-days or ventilator hours, or the limits will be falsely narrow.
 
 ## Step 4. Write the decisions file
