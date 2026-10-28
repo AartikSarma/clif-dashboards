@@ -427,5 +427,9 @@ def build(site: SiteBuild) -> BuildResult:
             "proning_source": "CLIF_Proning_Incidence_Severe_ARF (commit 853338a), ported to Python",
         },
         data_quality={"outliers": outliers, "mortality_model": context.get("mort_model"),
+                      # A site whose deaths are spelled otherwise reads 0% mortality: show what it records
+                      "deaths_counted": int(episode_table["died"].sum()),
+                      "discharge_categories": {str(k): int(n) for k, n in episode_table.loc[
+                          episode_table["outcome_den"] == 1, "discharge"].value_counts().head(15).items()},
                       "proning_model": proning_info},
     )

@@ -40,8 +40,9 @@ def test_the_values_the_respiratory_code_names():
         "device_category": ["IMV", "Trach Collar", "High Flow NC", "IMV", "IMV", "IMV"],
         "mode_category": ["Assist Control-Volume Control", "Pressure Support/CPAP", "Blow by", None, "Blow by",
                           "Pressure Support/CPAP"]}
-    assert to_clif21("hospitalization", pd.DataFrame({"discharge_category": ["expired", "snf"]}))[
-        "discharge_category"].tolist() == ["Expired", "Skilled Nursing Facility (SNF)"]
+    assert to_clif21("hospitalization", pd.DataFrame({"discharge_category": ["expired", "snf", "EXPIRED", " Expired",
+                                                                             "Died", None]}))[
+        "discharge_category"].tolist() == ["Expired", "Skilled Nursing Facility (SNF)", "Expired", "Expired", "Died", None]
     assert to_clif21("code_status", pd.DataFrame({"code_status_category": ["dnr_or_dni", "presume_full"]}))[
         "code_status_category"].tolist() == ["DNR/DNI", "Presume Full"]
 
