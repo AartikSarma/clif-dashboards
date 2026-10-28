@@ -15,7 +15,7 @@ import yaml
 
 from clif_dash.build import build, build_all
 from clif_dash.config import load_config
-from clif_dash.dashboards import FLUIDS, STEWARDSHIP
+from clif_dash.dashboards import FLOW, FLUIDS, STEWARDSHIP
 
 REPO = Path(__file__).resolve().parent.parent
 TZ = "America/Los_Angeles"
@@ -113,8 +113,12 @@ def test_volumes_above_their_group_limit_are_counted_as_data_quality(built):
     assert quality["input_rows_over_limit"] == {"iv_fluids": {"rows": 1, "litres": 2000.0}}
 
 
-def test_a_dashboard_whose_tables_are_missing_is_skipped_only_when_the_site_chose_none(tmp_path):
+def test_a_dashboard_whose_tables_are_missing_is_skipped_with_a_message(tmp_path, capsys):
     cfg = load_config(write_site(tmp_path, with_input=False))
-    with pytest.raises(FileNotFoundError, match="fluids"):
-        build_all(cfg, [FLUIDS])
-    assert build_all(cfg, [STEWARDSHIP, FLUIDS], skip_unavailable=True) == {}   # neither has its tables here
+    built = build_all(cfg, [STEWARDSHIP, FLUIDS, FLOW])        # flow needs only ADT, which this site has
+    assert list(built) == ["flow"]
+    log = capsys.readouterr().out
+    assert "Could not build stewardship" in log and "clif_medication_admin_intermittent.parquet" in log
+    assert "Could not build fluids" in log and "clif_input.parquet" in log
+    with pytest.raises(FileNotFoundError, match="fluids"):    # asking for one dashboard alone still raises
+        build(cfg, FLUIDS)

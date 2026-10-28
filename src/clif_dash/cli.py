@@ -31,8 +31,13 @@ def main(argv=None) -> None:
         cfg = load_config(args.config, args.clif_dir)
         if args.workers:
             cfg = replace(cfg, workers=args.workers)
-        build_all(cfg, select_dashboards(parser, args.dashboards or cfg.dashboards),
-                  skip_unavailable=not (args.dashboards or cfg.dashboards_listed))
+        requested = select_dashboards(parser, args.dashboards or cfg.dashboards)
+        built = build_all(cfg, requested)
+        skipped = [d.id for d in requested if d.id not in built]
+        print(f"Built: {', '.join(built) or 'none'}" + (f". Not built (missing tables, see above): {', '.join(skipped)}"
+                                                         if skipped else ""), flush=True)
+        if not built:
+            parser.exit(1, "No dashboard could be built. The messages above name the missing files; if every table looks missing, check clif_dir and file_prefix in the config.\n")
     elif args.command == "serve":
         import uvicorn
 

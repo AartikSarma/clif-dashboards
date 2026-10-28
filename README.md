@@ -11,7 +11,7 @@ ICU quality-improvement dashboards computed from a site's own [CLIF](https://cli
 - **ICU Liberation**: the ABCDEF bundle per ICU day: pain assessment, documented SAT and SBT, sedation assessment and depth, sedative and benzodiazepine infusions, and delirium screening and positivity.
 - **Kidney**: acute kidney injury arising in the ICU (KDIGO creatinine criteria), creatinine monitoring, CRRT days and CRRT effluent dose.
 
-Fluids needs CLIF 3.0's `input` table. The others run on CLIF 2.1 or 3.0 tables: 3.0 renamed category values (`IMV` became `imv`, `Assist Control-Volume Control` became `acvc`, `Expired` became `expired`), and the build reads them back as their 2.1 equivalents using clifpy's own crosswalk, so a site gets the same numbers in either version. With no `dashboards:` line in the site config, the build makes every dashboard whose tables the site has and skips the rest.
+Fluids needs CLIF 3.0's `input` table. The others run on CLIF 2.1 or 3.0 tables: 3.0 renamed category values (`IMV` became `imv`, `Assist Control-Volume Control` became `acvc`, `Expired` became `expired`), and the build reads them back as their 2.1 equivalents using clifpy's own crosswalk, so a site gets the same numbers in either version. A dashboard whose required tables the site lacks is not built; the build says which tables it is missing and builds the rest.
 
 Everything runs on one machine inside your institution: a batch build reads your CLIF tables and writes the measures, and a local web server shows them. Nothing is sent anywhere. The build is designed for large sites; at UCSF it handles more than 80,000 ICU admissions.
 
@@ -50,7 +50,7 @@ The build reads parquet files named `<prefix><table>.parquet` (for example `clif
 | ICU Liberation | `patient_assessments` | `medication_admin_continuous`, `respiratory_support` |
 | Kidney | `labs` | `crrt_therapy`, `vitals` |
 
-A respiratory measure whose table is missing shows as unavailable. A missing required table stops the build with a message that names it.
+A respiratory measure whose optional table is missing shows as unavailable. A dashboard missing a required table is skipped: the build log says `Could not build <dashboard>` and names the missing files, builds the other dashboards, and ends with a line listing what was built and what was not. Only when no dashboard can be built (usually a wrong `clif_dir` or `file_prefix`) does the build stop with an error.
 
 ### 4. Write your site config
 

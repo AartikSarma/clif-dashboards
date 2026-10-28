@@ -31,7 +31,6 @@ class SiteConfig:
     cohort_encounters_per_chunk: int
     workers: int
     dashboards: tuple[str, ...] = DEFAULT_DASHBOARDS  # dashboards this site builds and serves
-    dashboards_listed: bool = False                   # whether the site YAML named them (else the default)
     dashboard: str | None = None                      # set by bind(): the dashboard being built or served
 
     def table_path(self, table: str) -> Path:
@@ -135,5 +134,4 @@ def load_config(config_path: str | Path, clif_dir_override: str | None = None) -
         cohort_encounters_per_chunk=int(raw.get("cohort_encounters_per_chunk", 300)),
         workers=int(raw.get("workers", 4)),
         dashboards=tuple(raw.get("dashboards") or DEFAULT_DASHBOARDS),
-        dashboards_listed=bool(raw.get("dashboards")),
     )

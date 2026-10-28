@@ -77,28 +77,37 @@ def stitch_site(cfg: SiteConfig) -> Site:
     return Site(encounters, mapping, adt, clifpy_source)
 
 
-def build_all(cfg: SiteConfig, dashboards: list[Dashboard], skip_unavailable: bool = False) -> dict[str, Path]:
-    """Build several dashboards from one stitching pass; returns each dashboard's output folder.
+def missing_tables(cfg: SiteConfig, dashboard: Dashboard) -> list[Path]:
+    """The CLIF files a dashboard needs that the site does not have: the encounter tables, then its own."""
+    encounter = [cfg.table_path(t) for t in stage.ENCOUNTER_TABLES if not cfg.table_path(t).exists()]
+    return encounter + dashboard.missing_required_tables(cfg)
 
-    A dashboard whose required tables are missing stops the build, unless
-    `skip_unavailable` (the site did not choose its dashboards), when it is skipped with a note.
+
+def build_all(cfg: SiteConfig, dashboards: list[Dashboard]) -> dict[str, Path]:
+    """Build several dashboards from one stitching pass; returns each built dashboard's output folder.
+
+    A dashboard whose required tables are missing is not built: the log says which
+    tables it lacks, and the others are built as usual.
     """
     available = []
     for dashboard in dashboards:
-        missing = dashboard.missing_required_tables(cfg)
-        if not missing:
-            available.append(dashboard)
-        elif skip_unavailable:
-            log(f"Skipping {dashboard.id}: required CLIF tables not found: {', '.join(p.name for p in missing)}")
+        missing = missing_tables(cfg, dashboard)
+        if missing:
+            log(f"Could not build {dashboard.id}: required CLIF tables not found in {cfg.clif_dir}: "
+                f"{', '.join(p.name for p in missing)}")
         else:
-            raise FileNotFoundError(f"{dashboard.id}: required CLIF tables not found: {', '.join(map(str, missing))}")
-    dashboards = available
+            available.append(dashboard)
+    if not available:
+        return {}
     site = stitch_site(cfg)
-    return {d.id: build_dashboard(cfg.bind(d.id), d, site) for d in dashboards}
+    return {d.id: build_dashboard(cfg.bind(d.id), d, site) for d in available}
 
 
 def build(cfg: SiteConfig, dashboard: Dashboard = DEFAULT_DASHBOARD) -> Path:
-    """Build one dashboard; returns its output folder."""
+    """Build one dashboard; returns its output folder. Missing required tables raise FileNotFoundError."""
+    missing = missing_tables(cfg, dashboard)
+    if missing:
+        raise FileNotFoundError(f"{dashboard.id}: required CLIF tables not found: {', '.join(map(str, missing))}")
     return build_all(cfg, [dashboard])[dashboard.id]
 
 

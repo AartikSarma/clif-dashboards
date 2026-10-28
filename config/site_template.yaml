@@ -10,7 +10,7 @@ decisions_dir: decisions              # platform.yaml (site-wide) and one <dashb
 # decisions:                          # optional: a site's own copy of any of those files, by name
 #   respiratory: decisions_my_site.yaml     (top-level config files stay out of git)
 output_dir: ../output/my_site         # built tables and staged data, one folder per dashboard: PHI, keep inside the institution
-dashboards: [respiratory, stewardship, microbiology, fluids, flow, glycemic, liberation, kidney]   # dashboards to build and serve; remove any whose tables your site lacks (fluids needs CLIF 3.0's input table)
+dashboards: [respiratory, stewardship, microbiology, fluids, flow, glycemic, liberation, kidney]   # dashboards to build and serve; one whose required tables are missing is skipped with a message (fluids needs CLIF 3.0's input table)
 encounters_per_chunk: 2000            # phase A chunk size (respiratory_support only)
 cohort_encounters_per_chunk: 300      # phase B chunk size (all large tables); lower it if workers run out of memory
 workers: 4                            # parallel worker processes; up to one fewer than the machine's cores
