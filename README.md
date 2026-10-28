@@ -11,7 +11,7 @@ ICU quality-improvement dashboards computed from a site's own [CLIF](https://cli
 - **ICU Liberation**: the ABCDEF bundle per ICU day: pain assessment, documented SAT and SBT, sedation assessment and depth, sedative and benzodiazepine infusions, and delirium screening and positivity.
 - **Kidney**: acute kidney injury arising in the ICU (KDIGO creatinine criteria), creatinine monitoring, CRRT days and CRRT effluent dose.
 
-Fluids needs CLIF 3.0's `input` table. The others run on CLIF 2.1 or 3.0 tables: 3.0 renamed category values (`IMV` became `imv`, `Assist Control-Volume Control` became `acvc`, `Expired` became `expired`), and the build reads them back as their 2.1 equivalents using clifpy's own crosswalk, so a site gets the same numbers in either version. fluids uses CLIF 3.0's `input` table and its categories. With no `dashboards:` line in the site config, the build makes every dashboard whose tables the site has and skips the rest.
+Fluids needs CLIF 3.0's `input` table. The others run on CLIF 2.1 or 3.0 tables: 3.0 renamed category values (`IMV` became `imv`, `Assist Control-Volume Control` became `acvc`, `Expired` became `expired`), and the build reads them back as their 2.1 equivalents using clifpy's own crosswalk, so a site gets the same numbers in either version. With no `dashboards:` line in the site config, the build makes every dashboard whose tables the site has and skips the rest.
 
 Everything runs on one machine inside your institution: a batch build reads your CLIF tables and writes the measures, and a local web server shows them. Nothing is sent anywhere. The build is designed for large sites; at UCSF it handles more than 80,000 ICU admissions.
 
@@ -68,7 +68,7 @@ file_prefix: clif_                         # the part of each file name before t
 site_name: My Hospital ICUs                # shown in the dashboard header
 site_timezone: America/Chicago             # days and months are grouped in this zone
 output_dir: /path/inside/your/institution  # built tables: these contain PHI
-dashboards: [respiratory, stewardship, microbiology, fluids]   # the dashboards to build and serve
+dashboards: [respiratory]                  # the dashboards to build and serve: list only those whose required tables you have
 workers: 8                                 # parallel processes; up to one fewer than your CPU cores
 ```
 
