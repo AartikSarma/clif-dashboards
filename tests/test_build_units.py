@@ -55,7 +55,7 @@ def test_staging_can_keep_only_the_rows_a_dashboard_reads(tmp_path):
                          where="lower(source.med_category) IN ('cefepime', 'vancomycin', 'meropenem')")
     assert staged == 3
     first = load_staged_chunk(cfg, "meds", "medication_admin_intermittent", 0)
-    assert first["med_category"].tolist() == ["Cefepime", "vancomycin"]
+    assert first["med_category"].tolist() == ["cefepime", "vancomycin"]   # read as the 2.1 spelling (vocabulary.py)
     assert load_staged_chunk(cfg, "meds", "medication_admin_intermittent", 1)["med_category"].tolist() == ["meropenem"]
 
 
