@@ -8,6 +8,13 @@ one ran, and respiratory_support rows the ICU days on invasive ventilation.
 Only those daily summaries reach pandas. Rows are one encounter's days in one
 unit at one hospital in one month.
 
+A second table, sedation_hours, feeds the Time of day page: hours on each
+sedative and opioid infusion and the charted rate, converted to one unit per
+drug with clifpy's dose converter, by month, hospital, unit and hour of day.
+It holds no encounter or demographics, so it stays small at a large site
+(tens of thousands of rows), and the sex, race and age filters do not apply
+to it.
+
 SAT and SBT here are documented trials only, counted per ICU day. The
 respiratory dashboard also counts trials found from the EHR (sedatives
 stopped, pressure support lowered) on its own vent-days, so its figures differ.
@@ -19,16 +26,21 @@ import pandas as pd
 from ...config import SiteConfig
 from ...dashboard import BuildResult, SiteBuild, log
 from ...icu import (DAY_KEY, days_present, frame_days, icu_intervals, icu_session, in_window, infusion_runs_sql,
-                    interval_days_sql, outlier_bounds, placed_sql, quoted, utc_text, whole_months)
+                    interval_days_sql, interval_hours_sql, outlier_bounds, placed_sql, quoted, source_sql,
+                    stopped_sql, utc_text, utc_timestamp, whole_months)
 from ...upstream import prep
 
-TABLES = ("patient_assessments", "medication_admin_continuous", "respiratory_support")
+TABLES = ("patient_assessments", "medication_admin_continuous", "respiratory_support", "vitals")
 REQUIRED_TABLES = ("patient_assessments",)
 STAY = ["encounter_block", "hospital", "unit", "month"]
 INFUSIONS = ("sedative", "benzodiazepine", "paralytic")
 DAY_COUNTS = ["pain_days", "rass_days", "rass_readings", "rass_in_range", "rass_scored_days", "deep_days",
               "cam_days", "cam_result_days", "cam_positive_days", "sedative_days", "benzodiazepine_days",
               "imv_days", "sat_eligible_days", "sat_days", "sbt_days"]
+# Drugs with a dose heatmap, in page order; each one's unit is a decision (dose_units)
+DOSE_DRUGS = ("propofol", "dexmedetomidine", "midazolam", "lorazepam", "ketamine", "fentanyl", "hydromorphone",
+              "morphine")
+BIN_KEY = ["month", "hospital", "unit", "hour"]
 
 
 def shared_values(decisions: dict) -> dict:
@@ -158,6 +170,112 @@ def ventilated_days(con, cfg: SiteConfig, decisions: dict) -> pd.DataFrame:
     return frame_days(con.execute(f"SELECT DISTINCT encounter_block, hospital, unit, day FROM ({placed})").df())
 
 
+def converted_doses(con, cfg: SiteConfig, units: dict[str, str]) -> tuple[pd.DataFrame, dict]:
+    """Charted infusion rows for the dose drugs, rates in each drug's unit (clifpy's converter).
+
+    Rows of adults with ICU time only. A stop, pause or hold has rate 0; a rate the converter
+    cannot convert is missing, so its time still counts as running but not toward a mean rate.
+    Also returns conversion counts by drug and status, for the data-quality page.
+    """
+    source = source_sql(cfg, "medication_admin_continuous")
+    time = utc_timestamp(con, source, "s.admin_dttm")
+    rows = con.execute(f"""
+        SELECT m.encounter_block, CAST(s.hospitalization_id AS VARCHAR) AS hospitalization_id, {time} AS admin_dttm,
+               lower(CAST(s.med_category AS VARCHAR)) AS med_category, TRY_CAST(s.med_dose AS DOUBLE) AS med_dose,
+               CAST(s.med_dose_unit AS VARCHAR) AS med_dose_unit, coalesce({stopped_sql(cfg)}, FALSE) AS stopped,
+               s.file_row_number
+        FROM {source} AS s
+        JOIN encounter_map AS m ON CAST(s.hospitalization_id AS VARCHAR) = CAST(m.hospitalization_id AS VARCHAR)
+        WHERE s.admin_dttm IS NOT NULL AND lower(CAST(s.med_category AS VARCHAR)) IN ({quoted(units)})
+          AND m.encounter_block IN (SELECT encounter_block FROM icu_rows)
+    """).df()
+    if rows.empty:
+        return rows.assign(rate=pd.Series(dtype=float)), {}
+    from clifpy.utils.unit_converter import convert_dose_units_by_med_category
+    weights = None
+    if cfg.table_path("vitals").exists():
+        con.register("dose_hospitalizations", rows[["hospitalization_id"]].drop_duplicates())
+        vitals = source_sql(cfg, "vitals")
+        weights = con.execute(f"""
+            SELECT CAST(s.hospitalization_id AS VARCHAR) AS hospitalization_id,
+                   {utc_timestamp(con, vitals, "s.recorded_dttm")} AS recorded_dttm,
+                   'weight_kg' AS vital_category, TRY_CAST(s.vital_value AS DOUBLE) AS vital_value
+            FROM {vitals} AS s
+            WHERE lower(CAST(s.vital_category AS VARCHAR)) = 'weight_kg'
+              AND CAST(s.hospitalization_id AS VARCHAR) IN (SELECT hospitalization_id FROM dose_hospitalizations)
+        """).df()
+        con.unregister("dose_hospitalizations")
+    present = {drug: unit for drug, unit in units.items() if drug in set(rows["med_category"])}
+    doses, _ = convert_dose_units_by_med_category(
+        rows[["file_row_number", "hospitalization_id", "admin_dttm", "med_category", "med_dose", "med_dose_unit"]],
+        vitals_df=weights, preferred_units=present, override=True)
+    # The converter does not keep row order: match its rows back by source position
+    doses = doses.set_index("file_row_number").reindex(rows["file_row_number"])
+    converted = doses["_convert_status"].eq("success").to_numpy()
+    rows["rate"] = doses["med_dose_converted"].where(converted).to_numpy()
+    stopped = (rows["stopped"] | rows["med_dose"].fillna(0).le(0)).to_numpy()
+    rows.loc[stopped, "rate"] = 0.0
+    status = pd.Series(["success" if ok else "stop or zero" if stop else "not converted"
+                        for ok, stop in zip(converted, stopped)], index=rows.index)
+    counts = status.groupby([rows["med_category"], status]).size()
+    return rows, {f"{drug} {status}": int(n) for (drug, status), n in counts.items()}
+
+
+def sedation_hours(con, cfg: SiteConfig, decisions: dict, first_day, last_day) -> tuple[pd.DataFrame, dict]:
+    """Hours of ICU time, of any continuous sedative, and of each dose drug with its mean rate,
+    by month, hospital, unit and local hour of day."""
+    shared = shared_values(decisions)
+    units = {drug: unit for drug, unit in shared["dose_units"].items() if drug in DOSE_DRUGS}
+    sedatives = [d.lower() for d in shared["sedatives"]]
+    doses, counts = converted_doses(con, cfg, units) if cfg.table_path("medication_admin_continuous").exists() \
+        else (pd.DataFrame(columns=["encounter_block", "med_category", "admin_dttm", "rate", "file_row_number"]), {})
+    con.register("dose_rows", doses[["encounter_block", "med_category", "admin_dttm", "rate", "file_row_number"]])
+    runs = f"""
+        SELECT encounter_block, med_category AS kind, rate, admin_dttm AS start_dttm,
+               coalesce(lead(admin_dttm) OVER (PARTITION BY encounter_block, med_category
+                                               ORDER BY admin_dttm, file_row_number),
+                        admin_dttm + INTERVAL 360 MINUTE) AS end_dttm
+        FROM dose_rows
+    """
+    running = f"SELECT * FROM ({runs}) WHERE (rate IS NULL OR rate > 0) AND end_dttm > start_dttm"
+    # Any sedative: the union of the sedatives' running intervals, so two drugs at once count once
+    any_sedative = f"""
+        WITH sedative AS (SELECT * FROM ({running}) WHERE kind IN ({quoted(sedatives)})),
+        ordered AS (
+            SELECT *, max(end_dttm) OVER (PARTITION BY encounter_block ORDER BY start_dttm
+                                          ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_end
+            FROM sedative
+        ),
+        islands AS (
+            SELECT *, sum(CASE WHEN previous_end IS NULL OR start_dttm > previous_end THEN 1 ELSE 0 END)
+                          OVER (PARTITION BY encounter_block ORDER BY start_dttm ROWS UNBOUNDED PRECEDING) AS island
+            FROM ordered
+        )
+        SELECT encounter_block, 'any_sedative' AS kind, NULL::DOUBLE AS rate, min(start_dttm) AS start_dttm,
+               max(end_dttm) AS end_dttm
+        FROM islands GROUP BY encounter_block, island
+    """
+    icu_time = "SELECT encounter_block, 'icu' AS kind, NULL::DOUBLE AS rate, in_dttm AS start_dttm, " \
+               "out_dttm AS end_dttm FROM icu_rows"
+    every = f"{running} UNION ALL ({any_sedative}) UNION ALL {icu_time}"
+    binned = con.execute(interval_hours_sql(every, first_day, last_day)).df()
+    con.unregister("dose_rows")
+
+    binned["hour"] = binned["hour"].astype(int)
+    wide = binned.pivot_table(index=BIN_KEY, columns="kind", values=["hours", "rate_hours", "rated_hours"],
+                              aggfunc="sum", fill_value=0.0)
+    table = pd.DataFrame(index=wide.index)
+    table["icu_hours"] = wide["hours"].get("icu", 0.0)
+    table["sedative_hours"] = wide["hours"].get("any_sedative", 0.0)
+    for drug in DOSE_DRUGS:
+        table[f"{drug}_hours"] = wide["hours"].get(drug, 0.0)
+        table[f"{drug}_rate_hours"] = wide["rate_hours"].get(drug, 0.0)
+        table[f"{drug}_rated_hours"] = wide["rated_hours"].get(drug, 0.0)
+    table = table.round(4).reset_index()
+    table["row_id"] = table[BIN_KEY].astype(str).agg(" · ".join, axis=1)
+    return table, {"units": units, "conversion": counts}
+
+
 def build(site: SiteBuild) -> BuildResult:
     cfg, con = site.cfg, site.con
     tz = cfg.site_timezone
@@ -179,10 +297,13 @@ def build(site: SiteBuild) -> BuildResult:
         log(f"Assessments and admissions cover whole months {coverage[0]:%Y-%m} to {coverage[1]:%Y-%m}; "
             f"{icu_days - len(days):,} ICU days outside them left out")
 
+    first_day, last_day = days["day"].min(), days["day"].max()
     with icu_session(con, cfg, intervals, site.mapping):
         infusions, paralytic_runs = infusion_days(con, cfg, decisions)
         assessments = daily_assessments(con, cfg, decisions, paralytic_runs)
         ventilated = ventilated_days(con, cfg, decisions)
+        hours, doses = sedation_hours(con, cfg, decisions, first_day, last_day) if len(days) \
+            else (pd.DataFrame(columns=["row_id", *BIN_KEY]), {"units": {}, "conversion": {}})
     log(f"Assessments on {len(assessments):,} ICU days; infusions on {infusions[DAY_KEY].drop_duplicates().shape[0]:,}; "
         f"invasive ventilation on {len(ventilated):,}")
 
@@ -243,10 +364,11 @@ def build(site: SiteBuild) -> BuildResult:
     ]
     log(f"{len(rows):,} stay-months; {int(rows['days_present'].sum()):,} days present")
     return BuildResult(
-        tables={"stay_months": rows},
+        tables={"stay_months": rows, "sedation_hours": hours},
         summary={"funnel": funnel},
-        meta={"months": sorted(rows["month"].unique().tolist())},
-        data_quality={"icu_rows_without_end": unended,
+        meta={"months": sorted(rows["month"].unique().tolist()),
+              "heatmap_units": {f"{drug}_rate": unit for drug, unit in doses["units"].items()}},
+        data_quality={"icu_rows_without_end": unended, "dose_conversion": doses["conversion"],
                       "months_counted": None if coverage is None else
                       {"first": f"{coverage[0]:%Y-%m}", "last": f"{coverage[1]:%Y-%m}",
                        "icu_days_left_out": icu_days - int(rows["days_present"].sum())}},

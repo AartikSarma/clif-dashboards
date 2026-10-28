@@ -832,7 +832,8 @@ function HeatmapCard({ heatmap, F, share }) {
       <div className="card-head"><h2>{heatmap.title}</h2></div>
       {heatmap.note && <p className="muted">{heatmap.note}</p>}
       <Loading state={state}>{(data) => data.n
-        ? <HourMonthHeatmap data={data} share={share} event={heatmap.event} />
+        ? <>{data.heatmap.unfiltered.length > 0 && <p className="muted">Not filtered by {data.heatmap.unfiltered.join(", ").toLowerCase()}: this heatmap is built without them.</p>}
+          <HourMonthHeatmap data={data} share={share} event={heatmap.event} unit={heatmap.unit} /></>
         : <p className="empty">No {heatmap.event} under the current filters.</p>}</Loading>
     </section>
   );
@@ -844,16 +845,16 @@ function TimeOfDay({ F }) {
     <div>
       <div className="page-head">
         <h1>Time of day</h1>
-        <p className="lede">Each column is a month and each row an hour of the day, in site time. "% of month" shows what share
-          of that month's events fell in each hour, so busy and quiet months compare fairly; "Count" shows the numbers.
-          The bars on the right add up every month shown.</p>
+        <p className="lede">Each column is a month and each row an hour of the day, in site time. For counted events, "% of month"
+          shows what share of that month's events fell in each hour, so busy and quiet months compare fairly, and "Count" shows
+          the numbers. Rates and shares of time are shown as they are. The bars on the right cover every month shown.</p>
       </div>
-      <div className="seg" style={{ marginBottom: 12 }}>
+      {META.heatmaps.some((h) => h.kind === "events") && <div className="seg" style={{ marginBottom: 12 }}>
         <div className="toggle" role="tablist">
           <button className={share ? "on" : ""} onClick={() => setShare(true)}>% of month</button>
           <button className={share ? "" : "on"} onClick={() => setShare(false)}>Count</button>
         </div>
-      </div>
+      </div>}
       {META.heatmaps.map((h) => <HeatmapCard key={h.id} heatmap={h} F={F} share={share} />)}
     </div>
   );
@@ -881,6 +882,8 @@ function Quality({ F }) {
       const clif30 = Object.entries(dq.respiratory_rows_clif30_only || {});
       if (clif30.length) notes.push(`respiratory_support rows with CLIF 3.0 values that CLIF 2.1, and so clifpy's waterfall, has no name for: ${clif30.map(([v, n]) => `${v} (${n.toLocaleString()})`).join(", ")}. A t_piece device is read as IMV, with mode Blow by when none is charted (clifpy's 2.1 convention for a T-piece trial), so it does not end the IMV episode; check that this site charts only intubated or tracheostomized patients on a T-piece that way. An APRV or AVAPS mode on an IMV device still counts as IMV.`);
       if (dq.deaths_counted === 0 && dq.discharge_categories) notes.push(`No encounter in the cohort is counted as a death, so mortality reads 0%. A death is a discharge_category listed under the mortality measure's death decision in config/decisions/respiratory.yaml (Expired, in any case or spacing). This cohort's discharge categories: ${Object.entries(dq.discharge_categories).map(([v, n]) => `${v} (${n.toLocaleString()})`).join(", ")}. If deaths are recorded under another value, add it to that decision exactly as recorded and rebuild.`);
+      const unconverted = Object.entries(dq.dose_conversion || {}).filter(([k]) => !k.endsWith(" success"));
+      if (unconverted.length) notes.push(`Infusion rows whose rate clifpy could not convert to the Time of day page's unit (they count as running, but not toward a mean rate): ${unconverted.map(([k, n]) => `${k} (${n.toLocaleString()})`).join(", ")}. Check med_dose_unit for these drugs, and that weights are charted for weight-based conversions.`);
       if (dq.documented_sat_rows === 0) notes.push("No documented SAT rows (sat_delivery_pass_fail or sat_delivery_performed): the SAT measure reads 0% because nothing is charted, not because no trials were given. The respiratory dashboard also finds SATs from the EHR.");
       if (dq.documented_sbt_rows === 0) notes.push("No documented SBT rows (sbt_delivery_pass_fail or sbt_delivery_performed): the SBT measure reads 0% because nothing is charted. The respiratory dashboard also finds SBTs from the EHR.");
       if (dq.cam_values && Object.keys(dq.cam_values).length) notes.push(`CAM-ICU values recorded: ${Object.entries(dq.cam_values).map(([v, n]) => `${v} (${n.toLocaleString()})`).join(", ")}. Positive is the value "positive", or 1 with no text value; check that this site's values map that way.`);

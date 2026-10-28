@@ -90,7 +90,7 @@ uv run clif-dash serve --config config/my_site.yaml
 
 Open http://127.0.0.1:8000 in a browser on the same machine. With more than one dashboard built, the first page lists them; each dashboard's header links back to that list. The server reads the built tables when it starts, so restart it (Ctrl-C, then the same command) after every build.
 
-The flow, respiratory and microbiology dashboards also have a **Time of day** page: heatmaps of ICU admissions and transfers out, intubations and extubations, and new antibiotic starts by hour of day and month, as counts or as each month's share.
+The flow, respiratory, microbiology and liberation dashboards also have a **Time of day** page: heatmaps by hour of day and month of ICU admissions and transfers out, intubations and extubations, new antibiotic starts, and (liberation) the share of ICU time on a continuous sedative and each sedative's and opioid's mean infusion rate, converted to one unit per drug with clifpy's dose converter.
 
 Start with each dashboard's **Data quality** page. It shows what your data can and cannot support, so that a gap in documentation is not mistaken for a gap in practice.
 

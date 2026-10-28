@@ -52,6 +52,6 @@ MICROBIOLOGY = Dashboard(
     # Cultures cluster within patients, so rates per day present get no limits; draws, starts and isolates do
     independent_denominators=frozenset({"blood culture draws", "antibacterial starts", "S. aureus isolates",
                                         "Enterobacterales isolates", "gram-negative isolates"}),
-    heatmaps=(Heatmap("antibiotic_start", "New antibacterial start", "antibiotic_starts", "start_time",
-                      "antibacterial starts", note="The first dose of each new antibacterial start in the ICU."),),
+    heatmaps=(Heatmap("antibiotic_start", "New antibacterial start", "antibiotic_starts", "antibacterial starts",
+                      time_column="start_time", note="The first dose of each new antibacterial start in the ICU."),),
 )

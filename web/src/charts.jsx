@@ -309,25 +309,31 @@ export function viridis(t) {
 
 const hourLabel = (h) => `${String(h).padStart(2, "0")}:00`;
 
-/** Events by hour of day (rows) and month (columns). `share`: each cell as a percent of its month's events.
-    The bars on the right are each hour's share of all events shown. */
-export function HourMonthHeatmap({ data, share, event }) {
+/** By hour of day (rows) and month (columns). Events: counts, or with `share` each month's percent.
+    Values (data.values): a rate or share per cell, in `unit`, with the hours behind it (data.weights).
+    The bars on the right sum or average every month shown. */
+export function HourMonthHeatmap({ data, share, event, unit }) {
   const [ref, w] = useWidth();
   const [hover, setHover] = useState(null);
-  const { months, counts, totals, n } = data;
+  const isValues = data.values != null;
+  const { months, n } = data;
+  const counts = isValues ? data.values : data.counts;
+  const totals = data.totals || [];
   const m = { t: 20, r: 70, b: 30, l: 46 };
   const cell = 13;
   const iw = Math.max(40, w - m.l - m.r), ih = cell * 24, height = ih + m.t + m.b;
   const x = scaleBand().domain(months).range([0, iw]);
-  const value = (h, j) => (share ? (totals[j] ? (100 * counts[h][j]) / totals[j] : null) : counts[h][j]);
+  const value = (h, j) => (isValues ? counts[h][j] : share ? (totals[j] ? (100 * counts[h][j]) / totals[j] : null) : counts[h][j]);
   // The top of the colour scale is the 98th percentile of the cells, so a few sparse months cannot wash out the rest
   const cells = counts.flatMap((row, h) => row.map((_, j) => value(h, j))).filter((v) => v != null).sort((a, b) => a - b);
   const max = cells.length ? cells[Math.min(cells.length - 1, Math.floor(0.98 * (cells.length - 1)))] || cells[cells.length - 1] : 0;
   const capped = cells.length && max < cells[cells.length - 1];
-  const hourTotals = counts.map((row) => row.reduce((a, b) => a + b, 0));
-  const hourMax = Math.max(1, ...hourTotals);
+  const hourTotals = isValues ? data.hour_values.map((v) => v ?? 0) : counts.map((row) => row.reduce((a, b) => a + b, 0));
+  const hourMax = Math.max(isValues ? 1e-9 : 1, ...hourTotals);
   const step = Math.ceil(months.length / Math.max(1, Math.floor(iw / 64)));
-  const fmtValue = (v) => (v == null ? "—" : share ? `${v.toFixed(1)}%` : v.toLocaleString());
+  const fmtValue = (v) => (v == null ? "—" : isValues ? `${v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : 1 })} ${unit}`
+    : share ? `${v.toFixed(1)}%` : v.toLocaleString());
+  const hours = (v) => `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${event}`;
   const onMove = (ev) => {
     const r = ev.currentTarget.getBoundingClientRect();
     const px = ev.clientX - r.left - m.l, py = ev.clientY - r.top - m.t;
@@ -358,17 +364,22 @@ export function HourMonthHeatmap({ data, share, event }) {
         </g>
       </svg>
       <div className="heat-legend">
-        <span>{share ? "0%" : "0"}</span>
+        <span>{isValues ? `0 ${unit}` : share ? "0%" : "0"}</span>
         <i style={{ background: `linear-gradient(to right, ${VIRIDIS.join(", ")})` }} />
-        <span>{capped ? "≥ " : ""}{fmtValue(max)}{share ? " of the month" : ` ${event}`}</span>
-        <span className="muted">{n.toLocaleString()} {event} in all</span>
+        <span>{capped ? "≥ " : ""}{fmtValue(max)}{isValues ? "" : share ? " of the month" : ` ${event}`}</span>
+        <span className="muted">{isValues ? hours(n) : `${n.toLocaleString()} ${event}`} in all</span>
       </div>
       {hover && (
         <Tooltip x={hover.x} y={hover.y} w={w}>
           <b>{monthLabel(months[hover.j])} · {hourLabel(hover.h)}–{String(hover.h).padStart(2, "0")}:59</b>
-          <div>{counts[hover.h][hover.j].toLocaleString()} {event}
-            {totals[hover.j] ? ` · ${((100 * counts[hover.h][hover.j]) / totals[hover.j]).toFixed(1)}% of ${totals[hover.j].toLocaleString()} that month` : ""}</div>
-          <div className="muted">This hour, all months: {hourTotals[hover.h].toLocaleString()} ({n ? ((100 * hourTotals[hover.h]) / n).toFixed(1) : 0}%)</div>
+          {isValues ? <>
+            <div>{fmtValue(counts[hover.h][hover.j])} · {hours(data.weights[hover.h][hover.j])}</div>
+            <div className="muted">This hour, all months: {fmtValue(data.hour_values[hover.h])}</div>
+          </> : <>
+            <div>{counts[hover.h][hover.j].toLocaleString()} {event}
+              {totals[hover.j] ? ` · ${((100 * counts[hover.h][hover.j]) / totals[hover.j]).toFixed(1)}% of ${totals[hover.j].toLocaleString()} that month` : ""}</div>
+            <div className="muted">This hour, all months: {hourTotals[hover.h].toLocaleString()} ({n ? ((100 * hourTotals[hover.h]) / n).toFixed(1) : 0}%)</div>
+          </>}
         </Tooltip>
       )}
     </div>

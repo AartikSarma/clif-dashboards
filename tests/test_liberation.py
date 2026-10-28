@@ -9,11 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import yaml
+from fastapi.testclient import TestClient
 
 from clif_dash.build import build
 from clif_dash.config import load_config
 from clif_dash.dashboards import LIBERATION
+from clif_dash.server.app import create_app
 from clif_dash.upstream import prep
 
 REPO = Path(__file__).resolve().parent.parent
@@ -67,16 +70,22 @@ def write_site(folder: Path) -> Path:
     assessments.to_parquet(folder / "clif_patient_assessments.parquet", index=False)
 
     infusions = pd.DataFrame([
-        # Propofol from before the ICU to Jan 11 06:00: sedative days 10 and 11
-        ("H1", "2024-01-10 10:00", "propofol", 20.0, "start"), ("H1", "2024-01-11 06:00", "propofol", 20.0, "stop"),
-        # Midazolam charted once at 20:00 on Jan 11 runs 6 h: benzodiazepine (and sedative) days 11 and 12
-        ("H1", "2024-01-11 20:00", "midazolam", 2.0, "going"),
+        # Propofol from before the ICU to Jan 11 06:00: sedative days 10 and 11. In the ICU from 12:00 at
+        # 20 mcg/kg/min, raised to 40 at 22:00
+        ("H1", "2024-01-10 10:00", "propofol", 20.0, "mcg/kg/min", "start"),
+        ("H1", "2024-01-10 22:00", "propofol", 40.0, "mcg/kg/min", "dose_change"),
+        ("H1", "2024-01-11 06:00", "propofol", 40.0, "mcg/kg/min", "stop"),
+        # Midazolam charted once at 20:00 on Jan 11 runs 6 h: benzodiazepine (and sedative) days 11 and 12;
+        # 2,000 mcg/hr is 2 mg/hr
+        ("H1", "2024-01-11 20:00", "midazolam", 2000.0, "mcg/hr", "going"),
         # Cisatracurium from midnight to 04:00 on Jan 11: a paralytic day
-        ("H1", "2024-01-11 00:00", "cisatracurium", 1.0, "start"),
-        ("H1", "2024-01-11 04:00", "cisatracurium", 1.0, "stop"),
-    ], columns=["hospitalization_id", "admin_dttm", "med_category", "med_dose", "mar_action_category"])
+        ("H1", "2024-01-11 00:00", "cisatracurium", 1.0, "mg/hr", "start"),
+        ("H1", "2024-01-11 04:00", "cisatracurium", 1.0, "mg/hr", "stop"),
+        # Fentanyl in a unit the converter does not know: 6 h running, with no rate
+        ("H1", "2024-01-11 12:00", "fentanyl", 3.0, "puffs", "going"),
+    ], columns=["hospitalization_id", "admin_dttm", "med_category", "med_dose", "med_dose_unit", "mar_action_category"])
     infusions["admin_dttm"] = infusions["admin_dttm"].map(local)
-    infusions["med_dose_unit"], infusions["mar_action_group"] = "mg/hr", "administered"
+    infusions["mar_action_group"] = "administered"
     infusions.to_parquet(folder / "clif_medication_admin_continuous.parquet", index=False)
 
     support = pd.DataFrame([("H1", "2024-01-10 14:00", "IMV"), ("H1", "2024-01-11 08:00", "IMV"),
@@ -104,8 +113,14 @@ EXPECTED = {
 }
 
 
-def test_each_day(tmp_path):
-    output = build(load_config(write_site(tmp_path)), LIBERATION)
+@pytest.fixture(scope="module")
+def built_site(tmp_path_factory):
+    cfg = load_config(write_site(tmp_path_factory.mktemp("liberation_site")))
+    return cfg, build(cfg, LIBERATION)
+
+
+def test_each_day(built_site):
+    _, output = built_site
     rows = pd.read_parquet(output / "stay_months.parquet").set_index("label_id")
     assert list(rows.index) == ["H1"]                         # the child (H2) makes no row
     assert rows.loc["H1", list(EXPECTED)].astype(int).to_dict() == EXPECTED
@@ -123,3 +138,25 @@ def test_drug_lists_and_rass_rules_match_respiratory():
     assert shared["sedatives"] == value(respiratory, "sat", "sedatives")
     assert shared["paralytics"] == prep.PARALYTIC_CATS
     assert value(liberation, "light_sedation", "target_range") == value(respiratory, "light_sedation", "target_range")
+
+
+def test_infusion_hours_and_rates_by_hour_of_day(built_site):
+    cfg, output = built_site
+    hours = pd.read_parquet(output / "sedation_hours.parquet")
+    totals = hours.drop(columns=["row_id", "month", "hospital", "unit", "hour"]).sum()
+    assert totals["icu_hours"] == pytest.approx(45)            # Jan 10 12:00 to Jan 12 09:00
+    assert totals["propofol_hours"] == pytest.approx(18)       # 10 h at 20, then 8 h at 40
+    assert totals["propofol_rate_hours"] == pytest.approx(10 * 20 + 8 * 40)
+    assert totals["midazolam_rate_hours"] == pytest.approx(6 * 2)   # converted to mg/hr
+    assert totals["fentanyl_hours"] == pytest.approx(6) and totals["fentanyl_rated_hours"] == 0
+    assert totals["sedative_hours"] == pytest.approx(24)       # propofol and midazolam never overlap; fentanyl is no sedative
+
+    client = TestClient(create_app(cfg, [LIBERATION]))
+    heatmaps = {h["id"]: h for h in client.get("/api/liberation/meta").json()["heatmaps"]}
+    assert heatmaps["propofol_rate"]["unit"] == "mcg/kg/min" and heatmaps["midazolam_rate"]["unit"] == "mg/hr"
+    propofol = client.get("/api/liberation/heatmap/propofol_rate").json()
+    assert propofol["months"] == ["2024-01"]
+    assert propofol["values"][12][0] == 20 and propofol["values"][23][0] == 40 and propofol["values"][7][0] is None
+    sedated = client.get("/api/liberation/heatmap/sedative_time").json()
+    # 03:00: in the ICU on Jan 11 and Jan 12 (2 h), on propofol on Jan 11 only
+    assert sedated["values"][3][0] == pytest.approx(50)

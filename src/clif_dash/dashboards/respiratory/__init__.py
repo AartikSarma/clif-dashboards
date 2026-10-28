@@ -23,9 +23,9 @@ RESPIRATORY = Dashboard(
     completeness=registry.COMPLETENESS,
     independent_denominators=registry.INDEPENDENT_DENOMINATORS,
     detail=TimelineBuilder,
-    heatmaps=(Heatmap("intubation", "Intubation", "episodes", "start", "intubations",
+    heatmaps=(Heatmap("intubation", "Intubation", "episodes", "intubations", time_column="start",
                       note="The start of each IMV episode."),
-              Heatmap("extubation", "Extubation", "episodes", "first_extubation", "extubations",
+              Heatmap("extubation", "Extubation", "episodes", "extubations", time_column="first_extubation",
                       note="Each episode's first extubation: the end of an IMV run followed by another device "
                            "other than a trach collar. Deaths and comfort-care extubations are included.")),
 )

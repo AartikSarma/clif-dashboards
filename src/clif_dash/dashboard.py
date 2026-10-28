@@ -209,21 +209,36 @@ class RowTable:
 
 @dataclass(frozen=True)
 class Heatmap:
-    """How a timed event spreads over the day: counts by hour (rows) and month (columns), in site time.
+    """A pattern over the day: one value per hour (rows) and month (columns), in site time.
 
-    Each row of `source` with a time in `time_column` is one event, placed by the hour and
-    month of that time; with `where`, only rows whose `where` column is true or non-zero count.
+    Events (`time_column`): each row of `source` with a time there is one event, placed by
+    the hour and month of that time; with `where`, only rows whose `where` column is true or
+    non-zero count. Cells are counts, or each month's share.
+
+    Values (`hour_column`): rows already binned by local hour of day (that column) and
+    `month`; each cell is scale × Σ numerator ÷ Σ denominator, a mean rate or a share of
+    time, shown in `unit` (or the unit the build records under meta["heatmap_units"][id]).
     """
     id: str
     title: str
     source: str                  # which row table (RowTable.name)
-    time_column: str             # a time-zone-aware column of that table
-    event: str                   # what one event is, plural: "ICU admissions"
+    event: str                   # what is counted, plural: "ICU admissions"; for values, what the denominator sums
+    time_column: str | None = None
     where: str | None = None
+    hour_column: str | None = None
+    numerator: str | None = None
+    denominator: str | None = None
+    scale: float = 1.0
+    unit: str = ""
     note: str = ""
 
-    def public(self) -> dict:
-        return {"id": self.id, "title": self.title, "event": self.event, "note": self.note}
+    @property
+    def kind(self) -> str:
+        return "values" if self.hour_column else "events"
+
+    def public(self, units: dict | None = None) -> dict:
+        return {"id": self.id, "title": self.title, "event": self.event, "note": self.note, "kind": self.kind,
+                "unit": (units or {}).get(self.id, self.unit)}
 
 
 @dataclass(frozen=True)

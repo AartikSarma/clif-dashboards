@@ -83,6 +83,13 @@ shared:
     alternatives: []
     source: Same rule as the respiratory dashboard's infusion intervals
 
+  - id: dose_units
+    label: Infusion rate units
+    value: {propofol: mcg/kg/min, dexmedetomidine: mcg/kg/hr, midazolam: mg/hr, lorazepam: mg/hr, ketamine: mg/kg/hr, fentanyl: mcg/hr, hydromorphone: mg/hr, morphine: mg/hr}
+    display: "Time of day page: each drug's charted infusion rate converted to one unit with clifpy's dose converter, using the patient's most recent charted weight when a conversion needs one (mg/hr to mcg/kg/min, say). Rates it cannot convert are left out of the mean rate but their time still counts as running. The rate runs until the next charted row for the drug, or 6 h after the last, as in the infusion-running decision, so it is the charted rate, not the drug delivered"
+    alternatives: []
+    source: Local choice; clifpy unit_converter
+
   - id: imv_devices
     label: Invasive ventilation
     value: [imv]

@@ -209,6 +209,51 @@ def placed_sql(con, cfg: SiteConfig, table: str, time_column: str, columns: str,
 STOPPED_ACTIONS = ("stop", "stopped", "paused", "hold", "held")
 
 
+def stopped_sql(cfg: SiteConfig) -> str:
+    """SQL, over medication_admin_continuous rows (alias s), true for a stop, pause or hold, or an
+    action group not_administered: rows that end an infusion rather than set its rate."""
+    columns = set(stage.source_columns(cfg, "medication_admin_continuous"))
+    stops = [f"lower(CAST(s.mar_action_category AS VARCHAR)) IN ({quoted(STOPPED_ACTIONS)})"
+             if "mar_action_category" in columns else None,
+             "lower(CAST(s.mar_action_group AS VARCHAR)) = 'not_administered'" if "mar_action_group" in columns else None]
+    return "(" + (" OR ".join(c for c in stops if c) or "FALSE") + ")"
+
+
+def interval_hours_sql(intervals: str, first_day, last_day) -> str:
+    """SQL for the hours each interval spends in an ICU, by local month and hour of day.
+
+    `intervals` is SQL giving encounter_block, kind, rate, start_dttm, end_dttm; each is
+    clipped to the ICU rows it overlaps and split at local clock hours, and only hours on
+    local days from `first_day` to `last_day` count. Gives encounter_block, hospital, unit,
+    month, hour, kind, hours, and rate_hours and rated_hours (hours × rate and hours, over
+    pieces with a known rate). Run inside `icu_session`.
+    """
+    return f"""
+        WITH clipped AS (
+            SELECT r.encounter_block, i.hospital, i.unit, r.kind, r.rate,
+                   greatest(r.start_dttm, i.in_dttm) AS start_dttm, least(r.end_dttm, i.out_dttm) AS end_dttm
+            FROM ({intervals}) AS r
+            JOIN icu_rows AS i ON i.encounter_block = r.encounter_block
+                 AND r.start_dttm < i.out_dttm AND r.end_dttm > i.in_dttm
+        ),
+        binned AS (
+            SELECT *, unnest(generate_series(date_trunc('hour', start_dttm), end_dttm - INTERVAL 1 MICROSECOND,
+                                             INTERVAL 1 HOUR)) AS bin
+            FROM clipped
+        ),
+        pieces AS (
+            SELECT encounter_block, hospital, unit, kind, rate, bin,
+                   epoch(least(end_dttm, bin + INTERVAL 1 HOUR) - greatest(start_dttm, bin)) / 3600.0 AS hours
+            FROM binned
+            WHERE CAST(bin AS DATE) BETWEEN DATE '{first_day:%Y-%m-%d}' AND DATE '{last_day:%Y-%m-%d}'
+        )
+        SELECT encounter_block, hospital, unit, strftime(bin, '%Y-%m') AS month, hour(bin) AS hour, kind,
+               sum(hours) AS hours, sum(hours * rate) FILTER (WHERE rate IS NOT NULL) AS rate_hours,
+               sum(hours) FILTER (WHERE rate IS NOT NULL) AS rated_hours
+        FROM pieces GROUP BY ALL
+    """
+
+
 def infusion_runs_sql(con, cfg: SiteConfig, agents: dict[str, list[str]], last_hours: float = 6) -> str:
     """SQL for the intervals in which each kind of continuous infusion runs, per encounter.
 
@@ -223,11 +268,7 @@ def infusion_runs_sql(con, cfg: SiteConfig, agents: dict[str, list[str]], last_h
     kinds = " ".join(f"WHEN lower(CAST(s.med_category AS VARCHAR)) IN ({quoted(v)}) THEN '{k}'"
                      for k, v in agents.items())
     every = quoted([a for v in agents.values() for a in v])
-    columns = set(stage.source_columns(cfg, "medication_admin_continuous"))
-    stops = [f"lower(CAST(s.mar_action_category AS VARCHAR)) IN ({quoted(STOPPED_ACTIONS)})"
-             if "mar_action_category" in columns else None,
-             "lower(CAST(s.mar_action_group AS VARCHAR)) = 'not_administered'" if "mar_action_group" in columns else None]
-    stopped = " OR ".join(c for c in stops if c) or "FALSE"
+    stopped = stopped_sql(cfg)
     return f"""
         SELECT encounter_block, kind, start_dttm, end_dttm FROM (
             SELECT m.encounter_block, CASE {kinds} END AS kind, {time} AS start_dttm,

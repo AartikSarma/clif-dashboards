@@ -48,9 +48,9 @@ FLOW = Dashboard(
     completeness=[],
     # One row per encounter, so encounters and their transfers out are independent enough for p-chart limits
     independent_denominators=frozenset({"ICU encounters", "transfers out of the ICU"}),
-    heatmaps=(Heatmap("icu_admission", "ICU admission", "encounters", "icu_admission", "ICU admissions",
+    heatmaps=(Heatmap("icu_admission", "ICU admission", "encounters", "ICU admissions", time_column="icu_admission",
                       note="The first ICU ADT row of each encounter."),
-              Heatmap("transfer_out", "Transfer out of the ICU", "encounters", "transfer_out_time",
-                      "transfers out", where="transferred_out",
+              Heatmap("transfer_out", "Transfer out of the ICU", "encounters", "transfers out",
+                      time_column="transfer_out_time", where="transferred_out",
                       note="Each encounter's first transfer from an ICU to a non-ICU location, alive.")),
 )

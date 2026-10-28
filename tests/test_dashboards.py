@@ -148,4 +148,27 @@ def test_every_measure_page_of_every_dashboard_answers(built):
             assert every.get(f"/api/{dashboard.id}/{page}").status_code == 200, (dashboard.id, page)
         for heatmap in dashboard.heatmaps:
             response = every.get(f"/api/{dashboard.id}/heatmap/{heatmap.id}").json()
-            assert response["n"] == sum(response["totals"]) > 0, (dashboard.id, heatmap.id)
+            if heatmap.kind == "events":
+                assert response["n"] == sum(response["totals"]) > 0, (dashboard.id, heatmap.id)
+            elif response["n"]:      # values: drugs the synthetic data never charts have none
+                assert len(response["values"]) == 24 and len(response["values"][0]) == len(response["months"])
+
+
+def test_each_drugs_mean_infusion_rate_lies_within_its_charted_rates(built):
+    """The dose converter returns rows out of order; rates matched to the wrong drug would break this."""
+    import duckdb
+
+    cfg, _, _ = built
+    output = build(cfg, LIBERATION)
+    hours = pd.read_parquet(output / "sedation_hours.parquet")
+    charted = duckdb.sql(f"""
+        SELECT lower(med_category), min(med_dose), max(med_dose)
+        FROM read_parquet('{cfg.table_path("medication_admin_continuous")}') WHERE med_dose > 0 GROUP BY 1
+    """).fetchall()
+    checked = 0
+    for drug, low, high in charted:
+        if f"{drug}_rated_hours" in hours and hours[f"{drug}_rated_hours"].sum() > 0:
+            mean = hours[f"{drug}_rate_hours"].sum() / hours[f"{drug}_rated_hours"].sum()
+            assert low <= mean <= high, (drug, mean, low, high)   # the synthetic data charts each drug in its target unit
+            checked += 1
+    assert checked >= 3

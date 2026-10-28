@@ -1,10 +1,27 @@
 """ICU Liberation (ABCDEF bundle): pain, SAT and SBT, sedation and delirium per ICU day, by ICU."""
 from __future__ import annotations
 
-from ...dashboard import Dashboard, Metric, RowTable
+from ...dashboard import Dashboard, Heatmap, Metric, RowTable
 from . import build
 
 STAY_MONTHS = RowTable("stay_months", "row_id", "ICU stay-month", "ICU stay-months")
+# Hours by month, hospital, unit and hour of day, for the Time of day page (no measures; no demographics)
+SEDATION_HOURS = RowTable("sedation_hours", "row_id", "hour-of-day bin", "hour-of-day bins")
+DRUG_NAMES = {"propofol": "Propofol", "dexmedetomidine": "Dexmedetomidine", "midazolam": "Midazolam",
+              "lorazepam": "Lorazepam", "ketamine": "Ketamine", "fentanyl": "Fentanyl",
+              "hydromorphone": "Hydromorphone", "morphine": "Morphine"}
+HEATMAPS = (
+    Heatmap("sedative_time", "Continuous sedative running", "sedation_hours", "ICU hours", hour_column="hour",
+            numerator="sedative_hours", denominator="icu_hours", scale=100, unit="% of ICU time",
+            note="The share of ICU time in each hour with any continuous sedative running (propofol, midazolam, "
+                 "lorazepam, dexmedetomidine, ketamine; opioids alone are not counted). This is the view that shows "
+                 "when patients are sedated."),
+    *(Heatmap(f"{drug}_rate", f"{DRUG_NAMES[drug]} infusion rate", "sedation_hours", f"{drug} infusion hours",
+              hour_column="hour", numerator=f"{drug}_rate_hours", denominator=f"{drug}_rated_hours",
+              note=f"The mean charted {drug} infusion rate while it was running, weighted by time. It is the "
+                   "charted rate, not the drug delivered; read it beside how many infusion hours each cell holds.")
+      for drug in build.DOSE_DRUGS),
+)
 DAYS = "days present"
 
 
@@ -48,7 +65,7 @@ LIBERATION = Dashboard(
     site_statistics=build.site_statistics,
     build=build.build,
     data_quality=build.data_quality,
-    row_tables=(STAY_MONTHS,),
+    row_tables=(STAY_MONTHS, SEDATION_HOURS),
     metrics=METRICS,
     domains=["A: Pain", "B: Awakening and breathing trials", "C: Sedation", "D: Delirium"],
     strata=[("unit", "ICU"), ("hospital", "Hospital"), ("sex", "Sex"), ("race_eth", "Race / ethnicity"),
@@ -57,4 +74,5 @@ LIBERATION = Dashboard(
     completeness=[],
     # ICU days and RASS readings cluster within patients, so no measure gets control limits
     independent_denominators=frozenset(),
+    heatmaps=HEATMAPS,
 )

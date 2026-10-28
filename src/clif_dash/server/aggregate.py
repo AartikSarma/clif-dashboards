@@ -86,6 +86,28 @@ def hour_by_month(rows: pd.DataFrame, time_column: str, tz: str, where: str | No
             "totals": table.sum(axis=0).astype(int).tolist(), "n": int(table.to_numpy().sum())}
 
 
+def binned_by_month(rows: pd.DataFrame, hour_column: str, numerator: str, denominator: str,
+                    scale: float = 1.0) -> dict:
+    """Rows binned by hour of day and month: scale × Σ numerator ÷ Σ denominator per cell, and Σ denominator.
+
+    A cell with no denominator has no value.
+    """
+    if not len(rows) or not rows[denominator].fillna(0).gt(0).any():
+        return {"months": [], "hours": list(range(24)), "values": [[] for _ in range(24)],
+                "weights": [[] for _ in range(24)], "n": 0}
+    rows = rows[rows[denominator].fillna(0) > 0]
+    months = list(pd.period_range(rows["month"].min(), rows["month"].max(), freq="M").strftime("%Y-%m"))
+    sums = rows.groupby([hour_column, "month"])[[numerator, denominator]].sum()
+    shape = lambda column: (sums[column].unstack("month").reindex(index=range(24), columns=months).fillna(0.0))
+    top, bottom = shape(numerator), shape(denominator)
+    values = (scale * top / bottom.where(bottom > 0)).round(4)
+    return {"months": months, "hours": list(range(24)),
+            "values": [[None if pd.isna(v) else float(v) for v in row] for row in values.to_numpy()],
+            "weights": bottom.round(2).to_numpy().tolist(), "n": float(round(bottom.to_numpy().sum(), 2)),
+            "hour_values": [None if not b else round(scale * t / b, 4)
+                            for t, b in zip(top.sum(axis=1), bottom.sum(axis=1))]}
+
+
 def _int_if_whole(value: float):
     return int(value) if float(value).is_integer() else value
 

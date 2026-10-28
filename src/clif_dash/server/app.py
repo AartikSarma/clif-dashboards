@@ -104,7 +104,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
             "completeness": [list(c) for c in completeness_flags],
             "filter_fields": [f.public() for f in filter_fields], "filter_options": store.filter_options(),
             "n_total": int(len(store.primary_rows)),
-            "heatmaps": [h.public() for h in dashboard.heatmaps],
+            "heatmaps": [h.public(store.meta.get("heatmap_units")) for h in dashboard.heatmaps],
         })
 
     @router.get("/overview")
@@ -265,8 +265,16 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         if chosen is None:
             raise HTTPException(404, f"no heatmap {heatmap_id}")
         rows = filtered(request)[chosen.source]
-        return jsonable({"heatmap": chosen.public(), **agg.hour_by_month(rows, chosen.time_column, cfg.site_timezone,
-                                                                         chosen.where)})
+        # Filters on columns this table lacks (demographics, on a table binned without them) do not apply
+        filters = parse_filters(request, filter_fields)
+        public = {**chosen.public(store.meta.get("heatmap_units")),
+                  "unfiltered": [f.label for f in filter_fields
+                                 if f.column not in rows.columns and (f.column in filters.values or f.column in filters.flags)]}
+        if chosen.kind == "values":
+            return jsonable({"heatmap": public, **agg.binned_by_month(rows, chosen.hour_column, chosen.numerator,
+                                                                      chosen.denominator, chosen.scale)})
+        return jsonable({"heatmap": public, **agg.hour_by_month(rows, chosen.time_column, cfg.site_timezone,
+                                                                chosen.where)})
 
     @router.get("/quality")
     def quality(request: Request):
