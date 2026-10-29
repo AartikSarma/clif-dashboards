@@ -13,13 +13,13 @@ PHI) and writes a folder that holds none, to copy to a server that runs
 
 The staged chunks, encounter mapping and timelines are not copied.
 
-The dimensions decide how fine the cells are. By default they are month, hospital and
-ICU, so a cell holds every stay-month (or episode, or encounter) in one unit in one
-month, and the shared server offers those filters and breakdowns only. Adding sex,
-race and ethnicity, age band and the dashboards' own filters (DEMOGRAPHIC_DIMENSIONS
-and `all`) restores every filter, but crossing them all leaves most cells with a
-single patient: the export then describes individuals without naming them. The
-export reports, per table, how many cells hold one row.
+The dimensions decide how fine the cells are. By default they are every filter and
+breakdown a table has (month, hospital, ICU, sex, race and ethnicity, age band and the
+dashboard's own filters), so the shared server offers every page the site's own does
+except the patient lists and timelines. Crossing them all leaves many cells with a
+single patient; the dashboards are for the site's own reviewers, who may see that.
+For a wider audience, COARSE_DIMENSIONS (month, hospital and ICU) keeps cells large
+and drops the other filters. The export reports, per table, how many cells hold one row.
 """
 from __future__ import annotations
 
@@ -34,9 +34,9 @@ from .cube import CELL_KEYS, N_ROWS, value_bin
 from .dashboard import Dashboard
 
 FORMAT = 1
-DEFAULT_DIMENSIONS = ("month", "hospital", "unit")
-DEMOGRAPHIC_DIMENSIONS = ("sex", "race_eth", "age_band")
 ALL = "all"     # every filter and breakdown column a table has
+DEFAULT_DIMENSIONS = ALL
+COARSE_DIMENSIONS = ("month", "hospital", "unit")
 
 
 def cell_keys(dashboard: Dashboard, rows: pd.DataFrame, dimensions=DEFAULT_DIMENSIONS) -> list[str]:

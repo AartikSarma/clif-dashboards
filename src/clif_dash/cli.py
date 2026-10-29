@@ -21,9 +21,9 @@ def main(argv=None) -> None:
     export_parser.add_argument("--dashboard", action="append", dest="dashboards", metavar="ID",
                                help="export only this dashboard (repeatable; default: every built dashboard)")
     export_parser.add_argument("--dimensions", nargs="+", metavar="COLUMN",
-                               help="what cells are split by (default: month hospital unit). Adding sex race_eth "
-                                    "age_band, or `all`, keeps those filters on the shared server but leaves many "
-                                    "cells holding one patient")
+                               help="what cells are split by (default: all, every filter and breakdown). "
+                                    "`month hospital unit` keeps cells large for a wider audience, and the shared "
+                                    "server then offers only those filters")
     serve_parser = commands.add_parser("serve", help="serve the dashboard API and web UI from a build or an export")
     source = serve_parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--config", help="site YAML used for the build (serves its patient-level build)")

@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from clif_dash.build import build
 from clif_dash.dashboards import FLOW, GLYCEMIC, KIDNEY, LIBERATION, MICROBIOLOGY, RESPIRATORY, STEWARDSHIP
-from clif_dash.export import ALL, aggregate_config, export
+from clif_dash.export import COARSE_DIMENSIONS, aggregate_config, export
 from clif_dash.server.app import create_app
 
 DASHBOARDS = [RESPIRATORY, STEWARDSHIP, MICROBIOLOGY, FLOW, GLYCEMIC, LIBERATION, KIDNEY]
@@ -27,9 +27,9 @@ def servers(built, tmp_path_factory):
     cfg, _, _ = built
     for dashboard in DASHBOARDS[1:]:
         build(cfg, dashboard)
-    # Every filter, so every page can be compared with the patient-level server
+    # The default splits by every filter, so every page can be compared with the patient-level server
     folder = tmp_path_factory.mktemp("aggregate_export")
-    assert list(export(cfg, DASHBOARDS, folder, ALL)) == [d.id for d in DASHBOARDS]
+    assert list(export(cfg, DASHBOARDS, folder)) == [d.id for d in DASHBOARDS]
     return (TestClient(create_app(cfg, DASHBOARDS)), TestClient(create_app(aggregate_config(folder), DASHBOARDS)),
             folder)
 
@@ -115,10 +115,10 @@ def test_an_export_cannot_be_served_with_patient_rows(servers):
     assert forced.get("/api/respiratory/rows").status_code == 404
 
 
-def test_the_default_export_is_split_only_by_month_hospital_and_icu(built, servers, tmp_path):
+def test_a_coarse_export_is_split_only_by_month_hospital_and_icu(built, servers, tmp_path):
     cfg, _, _ = built
     patient, _, _ = servers
-    reports = export(cfg, DASHBOARDS, tmp_path)
+    reports = export(cfg, DASHBOARDS, tmp_path, COARSE_DIMENSIONS)
     assert reports["respiratory"]["episodes"]["rows"] == 1295
     for path in tmp_path.glob("*/*.parquet"):
         assert not {"sex", "race_eth", "age_band", "code_status", "trach"} & set(pd.read_parquet(path).columns), path

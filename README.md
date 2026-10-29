@@ -116,14 +116,14 @@ Rebuild after every update. If the code defines a measure your last build does n
 
 ## Share aggregates on another server
 
-To show the dashboards to people who should not see patient data, build at the site as usual, export the aggregates, and serve the export somewhere else. The export holds no patient rows, IDs or dates: each table becomes sums and counts per month, hospital and ICU, medians come from fine histograms (exact to within about 1%), and the timelines, staged data and encounter mapping stay behind.
+To show the dashboards to people who should not see patient data, build at the site as usual, export the aggregates, and serve the export somewhere else. The export holds no patient rows, IDs or dates: each table becomes sums and counts for every combination of the filters (month, hospital, ICU, sex, race and ethnicity, age band and each dashboard's own), medians come from fine histograms (exact to within about 1%), and the timelines, staged data and encounter mapping stay behind.
 
 ```bash
 uv run clif-dash export --config config/my_site.yaml --out /path/to/aggregates   # at the site, after a build
 uv run clif-dash serve --aggregates /path/to/aggregates                         # on the shared server
 ```
 
-The shared server offers the month, hospital and ICU filters and breakdowns; the sex, race and ethnicity, age band and dashboard-specific filters need patient-level splits and are left out. `--dimensions month hospital unit sex race_eth age_band` (or `--dimensions all`) keeps them, but crossing every filter leaves most cells holding a single patient, which then describes individuals without naming them. The export prints, for every table, how many cells hold a single row; read it before copying the folder anywhere. Small cells are not suppressed.
+The shared server offers every page and filter the site's own does, except the patient lists and timelines. Crossing every filter leaves many cells holding a single patient; the dashboards are meant for the site's own reviewers, so small cells are not suppressed. For a wider audience, `--dimensions month hospital unit` keeps cells large and offers only those filters. The export prints, for every table, how many cells hold a single row.
 
 ## Change a definition
 
