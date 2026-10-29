@@ -25,7 +25,7 @@ TOLERANCE = 1e-6
 @pytest.fixture(scope="session")
 def client(built):
     cfg, _, _ = built
-    return TestClient(create_app(cfg))
+    return TestClient(create_app(cfg, patient_level=True))
 
 
 @pytest.fixture(scope="session")

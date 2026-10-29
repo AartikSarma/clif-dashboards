@@ -39,8 +39,14 @@ def parse_filters(request: Request, fields: list[FilterField]) -> Filters:
     )
 
 
-def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None) -> FastAPI:
-    """Serve every dashboard in `dashboards` (default: the site's list) that has a finished build."""
+def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None,
+               patient_level: bool | None = None) -> FastAPI:
+    """Serve every dashboard in `dashboards` (default: the site's list) that has a finished build.
+
+    Only aggregates are served unless `patient_level` (default: the site's patient_level_data):
+    then the row lists, their CSV download and the detail views (respiratory timelines) are too.
+    """
+    patient_level = cfg.patient_level_data if patient_level is None else patient_level
     dashboards = [DASHBOARDS[i] for i in cfg.dashboards] if dashboards is None else dashboards
     built = [d for d in dashboards if (cfg.bind(d.id).dashboard_dir / "summary.json").exists()]
     app = FastAPI(title="CLIF ICU quality dashboards", docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -50,7 +56,8 @@ def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None) -> Fa
         return [{"id": d.id, "title": d.title} for d in built]
 
     for dashboard in built:
-        app.include_router(dashboard_routes(cfg.bind(dashboard.id), dashboard), prefix=f"/api/{dashboard.id}")
+        app.include_router(dashboard_routes(cfg.bind(dashboard.id), dashboard, patient_level),
+                           prefix=f"/api/{dashboard.id}")
 
     if WEB_DIST.exists():
         app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
@@ -62,15 +69,16 @@ def create_app(cfg: SiteConfig, dashboards: list[Dashboard] | None = None) -> Fa
     return app
 
 
-def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
-    """One dashboard's API. `cfg` is bound to the dashboard."""
+def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool = False) -> APIRouter:
+    """One dashboard's API. `cfg` is bound to the dashboard. Without `patient_level`, the routes that
+    return individual rows (/rows, /rows.csv, /detail) are not registered, so they answer 404."""
     store = Store(cfg, dashboard.row_tables, dashboard.filters)
     undefined = [m.id for m in dashboard.metrics if m.id not in store.decisions["metrics"]]
     if undefined:
         raise RuntimeError(f"The {dashboard.id} build in {cfg.dashboard_dir} has no decisions for "
                            f"{', '.join(undefined)}: it predates these measures. Rebuild it.")
     filter_fields = store.filter_fields()
-    detail_builder = dashboard.detail(store) if dashboard.detail else None
+    detail_builder = dashboard.detail(store) if dashboard.detail and patient_level else None
     metrics, metrics_by_id = dashboard.metrics, dashboard.metrics_by_id
     strata, completeness_flags = dashboard.strata, dashboard.completeness
     primary, id_column = store.primary.name, store.primary.id_column
@@ -95,7 +103,8 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
     @router.get("/meta")
     def meta():
         return jsonable({
-            "dashboard": {"id": dashboard.id, "title": dashboard.title, "detail": detail_builder is not None},
+            "dashboard": {"id": dashboard.id, "title": dashboard.title, "detail": detail_builder is not None,
+                          "patient_level": patient_level},
             "row_tables": [t.public() for t in dashboard.row_tables],
             "meta": store.meta, "decisions": store.decisions, "data_quality": store.summary["data_quality"],
             "funnels": {t.name: funnel_for(t.name) for t in dashboard.row_tables},
@@ -223,7 +232,16 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         pooled = metric.kind in ("ratio", "rate") and metric.denominator is not None
         return metric if pooled and metric.source == primary else None
 
-    @router.get("/rows")
+    @router.get("/count")
+    def count(request: Request):
+        """How many primary rows the filters keep: the rail's "n of N", an aggregate."""
+        return {"total": int(len(filtered(request)[primary]))}
+
+    def patient_route(path: str):
+        """Register a route that returns individual rows only when patient-level data is on."""
+        return router.get(path) if patient_level else (lambda function: function)
+
+    @patient_route("/rows")
     def row_list(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
                  q: str | None = None, sort: str = "start", direction: int = -1, offset: int = 0,
                  limit: int = Query(ROW_PAGE_SIZE, le=1000)):
@@ -232,7 +250,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         return jsonable({"total": int(len(rows)), "offset": offset, "note": note, "numerator_column": numerator_column,
                          "threshold": threshold, "rows": page.to_dict("records")})
 
-    @router.get("/rows.csv")
+    @patient_route("/rows.csv")
     def row_csv(request: Request, metric: str | None = None, field: str | None = None, value: str | None = None,
                 q: str | None = None, sort: str = "start", direction: int = -1):
         rows, *_ = row_selection(request, metric, field, value, q, sort, direction)
@@ -242,7 +260,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         return StreamingResponse(iter([buffer.getvalue()]), media_type="text/csv",
                                  headers={"Content-Disposition": f"attachment; filename={dashboard.id}_{primary}.csv"})
 
-    @router.get("/detail/{row_id}")
+    @patient_route("/detail/{row_id}")
     def row_detail(row_id: str):
         series = detail_builder.build(row_id) if detail_builder else None
         if series is None:

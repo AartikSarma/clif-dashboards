@@ -31,6 +31,9 @@ class SiteConfig:
     cohort_encounters_per_chunk: int
     workers: int
     dashboards: tuple[str, ...] = DEFAULT_DASHBOARDS  # dashboards this site builds and serves
+    # Serve patient-level rows (the list pages, their CSV and the timelines) as well as aggregates.
+    # Off unless the site turns it on: a server several people use should give out only aggregates.
+    patient_level_data: bool = False
     dashboard: str | None = None                      # set by bind(): the dashboard being built or served
 
     def table_path(self, table: str) -> Path:
@@ -134,4 +137,5 @@ def load_config(config_path: str | Path, clif_dir_override: str | None = None) -
         cohort_encounters_per_chunk=int(raw.get("cohort_encounters_per_chunk", 300)),
         workers=int(raw.get("workers", 4)),
         dashboards=tuple(raw.get("dashboards") or DEFAULT_DASHBOARDS),
+        patient_level_data=raw.get("patient_level_data") is True,
     )

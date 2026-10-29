@@ -18,6 +18,8 @@ let MBYID = {};
 let PRIMARY = null; // the dashboard's primary row table: { name, id_column, unit, unit_plural }
 
 const api = (path) => `/api/${DASH}${path}`;
+// Whether the server gives out individual rows (lists, CSV, timelines); off unless the site turns it on
+const patientLevel = () => Boolean(META && META.dashboard.patient_level);
 const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 const countOf = (n, table) => `${n} ${n === 1 ? table.unit : table.unit_plural}`;
 // Ratios and rates both pool a numerator over a denominator; means and medians report n.
@@ -385,7 +387,7 @@ function MetricPage({ id, F }) {
               </div>
             </div>
             {view === "bars" && <BarBreakdown rows={strata} meta={meta} target={meta.target} format={f}
-              onPick={(k) => go("patients", `${routeId}|${strat}|${k}`)} />}
+              onPick={patientLevel() ? (k) => go("patients", `${routeId}|${strat}|${k}`) : undefined} />}
             {view === "lines" && (
               <>
                 <div className="legend">
@@ -406,7 +408,7 @@ function MetricPage({ id, F }) {
                 </tbody>
               </table>
             )}
-            <p className="muted small">Click a bar to list the {PRIMARY.unit_plural} behind it.</p>
+            {patientLevel() && <p className="muted small">Click a bar to list the {PRIMARY.unit_plural} behind it.</p>}
           </section>
 
           {showsExpected(m) && (
@@ -443,7 +445,7 @@ function MetricPage({ id, F }) {
                 </table>
               ) : <p className="muted small">This measure depends on no optional input.</p>}
               <p className="small">Provenance: {META.meta.clifpy}; pipeline {META.meta.pipeline_version}; data folder <code>{META.meta.data_folder}</code>, built {META.meta.generated_at}.</p>
-              <button className="link" onClick={() => go("patients", `${routeId}|missed|1`)}>List {PRIMARY.unit_plural} {m.missedLabel === "missed" ? "that missed this measure" : `${m.missedLabel} use`} →</button>
+              {patientLevel() && <button className="link" onClick={() => go("patients", `${routeId}|missed|1`)}>List {PRIMARY.unit_plural} {m.missedLabel === "missed" ? "that missed this measure" : `${m.missedLabel} use`} →</button>}
             </section>
           </div>
         </div>
@@ -484,7 +486,7 @@ function Comparison({ F, by }) {
                     <th scope="row"><a href={route("metric", row.id)}><span className="h-num sm">{meta.number}</span>{meta.short}</a></th>
                     <HeatCell a={row.all} meta={meta} />
                     {data.groups.map((g) => (
-                      <HeatCell key={g} a={row.cells[g]} meta={meta} onClick={() => go("patients", `${row.id}|${column}|${g}`)} />
+                      <HeatCell key={g} a={row.cells[g]} meta={meta} onClick={patientLevel() ? () => go("patients", `${row.id}|${column}|${g}`) : undefined} />
                     ))}
                   </tr>
                 );
@@ -982,6 +984,17 @@ function Quality({ F }) {
   );
 }
 
+function AggregateOnly() {
+  return (
+    <section className="card">
+      <h2>Aggregates only</h2>
+      <p>This server gives out aggregate results only, so lists of {PRIMARY.unit_plural} and patient timelines are off.
+        A site that needs them for its own review can set <code>patient_level_data: true</code> in its site config,
+        or start the server with <code>--patient-level</code>.</p>
+    </section>
+  );
+}
+
 // ----------------------------------------------------------------------------
 // Shell
 // ----------------------------------------------------------------------------
@@ -989,10 +1002,10 @@ function App({ dashboards }) {
   const route_ = useRoute();
   const [F, setF] = useState({});
   const [theme, setTheme] = useState(null);
-  const count = useApi(`${api("/rows")}${query(F, { limit: 0 })}`);
+  const count = useApi(`${api("/count")}${query(F)}`);
   useEffect(() => { if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme; }, [theme]);
   const tabs = [["overview", "Overview"], ["metric", "Measures"], ["units", "ICU comparison"],
-    ...((META.filter_options.hospital || []).length > 1 ? [["hospitals", "Hospital comparison"]] : []), ["patients", cap(PRIMARY.unit_plural)],
+    ...((META.filter_options.hospital || []).length > 1 ? [["hospitals", "Hospital comparison"]] : []), ...(patientLevel() ? [["patients", cap(PRIMARY.unit_plural)]] : []),
     ...(detailView() ? [["timeline", detailView().label]] : []),
     ...((META.heatmaps || []).length ? [["timeofday", "Time of day"]] : []), ["quality", "Data quality"]];
   const firstMetric = METRICS[0].id;
@@ -1025,7 +1038,7 @@ function App({ dashboards }) {
           {route_.page === "overview" && <Overview F={F} />}
           {route_.page === "metric" && <MetricPage id={route_.arg || firstMetric} F={F} key={(route_.arg || firstMetric).split("@")[0]} />}
           {(route_.page === "units" || route_.page === "hospitals") && <Comparison F={F} by={route_.page} key={route_.page} />}
-          {route_.page === "patients" && <Patients F={F} arg={route_.arg} />}
+          {route_.page === "patients" && (patientLevel() ? <Patients F={F} arg={route_.arg} /> : <AggregateOnly />)}
           {route_.page === "timeline" && detailView() && detailView().view({ F, arg: route_.arg })}
           {route_.page === "timeofday" && (META.heatmaps || []).length > 0 && <TimeOfDay F={F} arg={route_.arg} />}
           {route_.page === "quality" && <Quality F={F} />}

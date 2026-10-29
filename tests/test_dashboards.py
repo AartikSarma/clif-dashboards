@@ -23,7 +23,7 @@ from clif_dash.server.app import create_app
 def client(built):
     cfg, _, _ = built
     build(cfg, STEWARDSHIP)
-    return TestClient(create_app(cfg, [RESPIRATORY, STEWARDSHIP]))
+    return TestClient(create_app(cfg, [RESPIRATORY, STEWARDSHIP], patient_level=True))
 
 
 @pytest.fixture(scope="module")
@@ -39,7 +39,7 @@ def test_both_dashboards_are_listed(client):
 
 def test_every_page_of_the_second_dashboard_answers(client, stay_months):
     meta = client.get("/api/stewardship/meta").json()
-    assert meta["dashboard"] == {"id": "stewardship", "title": STEWARDSHIP.title, "detail": False}
+    assert meta["dashboard"] == {"id": "stewardship", "title": STEWARDSHIP.title, "detail": False, "patient_level": True}
     assert [f[0] for f in meta["filter_fields"]] == ["hospital", "unit", "age_band", "sex", "race_eth"]
     assert [d["id"] for d in meta["decisions"]["shared"]][-1] == "control_limits"
     overview = client.get("/api/stewardship/overview").json()
@@ -136,7 +136,7 @@ def test_every_measure_page_of_every_dashboard_answers(built):
     dashboards = [RESPIRATORY, STEWARDSHIP, MICROBIOLOGY, FLOW, GLYCEMIC, LIBERATION, KIDNEY]
     for dashboard in dashboards[1:]:
         build(cfg, dashboard)
-    every = TestClient(create_app(cfg, dashboards))
+    every = TestClient(create_app(cfg, dashboards, patient_level=True))
     for dashboard in dashboards:
         for metric in dashboard.metrics:
             response = every.get(f"/api/{dashboard.id}/metric/{metric.id}")
@@ -173,3 +173,17 @@ def test_each_drugs_mean_infusion_rate_lies_within_its_charted_rates(built):
             assert low <= mean <= high, (drug, mean, low, high)   # the synthetic data charts each drug in its target unit
             checked += 1
     assert checked >= 3
+
+
+
+def test_only_aggregates_are_served_unless_patient_level_data_is_on(built):
+    cfg, _, _ = built
+    aggregate = TestClient(create_app(cfg, [RESPIRATORY]))     # the site config leaves patient_level_data off
+    meta = aggregate.get("/api/respiratory/meta").json()["dashboard"]
+    assert meta["patient_level"] is False and meta["detail"] is False
+    for path in ("/api/respiratory/rows", "/api/respiratory/rows.csv", "/api/respiratory/detail/anything"):
+        assert aggregate.get(path).status_code == 404, path
+    total = aggregate.get("/api/respiratory/count").json()["total"]
+    assert total == aggregate.get("/api/respiratory/meta").json()["n_total"]
+    full = TestClient(create_app(cfg, [RESPIRATORY], patient_level=True))
+    assert full.get("/api/respiratory/rows", params={"limit": 1}).json()["total"] == total

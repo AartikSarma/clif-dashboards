@@ -22,6 +22,9 @@ def main(argv=None) -> None:
     serve_parser.add_argument("--port", type=int, default=8000)
     serve_parser.add_argument("--dashboard", action="append", dest="dashboards", metavar="ID",
                               help="serve only this dashboard (repeatable; default: every built dashboard in the config)")
+    serve_parser.add_argument("--patient-level", action="store_true",
+                              help="also serve patient-level rows (lists, CSV, timelines); default: the config's "
+                                   "patient_level_data, which is off unless set")
     args = parser.parse_args(argv)
 
     if args.command == "build":
@@ -49,7 +52,11 @@ def main(argv=None) -> None:
             parser.exit(1, f"No built dashboard found under {cfg.output_dir} (looked for "
                            f"{', '.join(d.id + '/summary.json' for d in dashboards)}). "
                            f"Run: uv run clif-dash build --config {args.config}\n")
-        uvicorn.run(create_app(cfg, built), host=args.host, port=args.port)
+        patient_level = args.patient_level or cfg.patient_level_data
+        print("Serving patient-level rows (lists, CSV downloads, timelines) as well as aggregates" if patient_level
+              else "Serving aggregates only: patient lists, CSV downloads and timelines are off "
+                   "(set patient_level_data: true in the config, or pass --patient-level, to turn them on)", flush=True)
+        uvicorn.run(create_app(cfg, built, patient_level=patient_level), host=args.host, port=args.port)
 
 
 def select_dashboards(parser: argparse.ArgumentParser, ids) -> list:

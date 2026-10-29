@@ -88,6 +88,8 @@ This builds every dashboard in your `dashboards:` list. To build only one, add `
 uv run clif-dash serve --config config/my_site.yaml
 ```
 
+By default the server gives out aggregates only: measures, breakdowns, comparisons, heatmaps and data-quality counts. The pages that list individual patients (IMV episodes, ICU stay-months and so on), their CSV download and the respiratory timelines are off, and their API routes answer 404. For a site's own case review, turn them on with `patient_level_data: true` in the site config, or for one session with `uv run clif-dash serve --config config/my_site.yaml --patient-level`; the server says which mode it is in when it starts. Aggregates can still describe a single patient when the filters narrow a group far enough.
+
 Open http://127.0.0.1:8000 in a browser on the same machine. With more than one dashboard built, the first page lists them; each dashboard's header links back to that list. The server reads the built tables when it starts, so restart it (Ctrl-C, then the same command) after every build.
 
 The flow, respiratory, microbiology and liberation dashboards also have a **Time of day** page: heatmaps by hour of day and month of ICU admissions and transfers out, intubations and extubations, new antibiotic starts, and (liberation) the share of ICU time on a continuous sedative, mean RASS and RASS in the target range, and each sedative's and opioid's mean infusion rate, converted to one unit per drug with clifpy's dose converter. Each heatmap can be shown by hour and month, or by day of week and hour over the months the From and To filters select.
