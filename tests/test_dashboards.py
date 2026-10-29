@@ -39,7 +39,8 @@ def test_both_dashboards_are_listed(client):
 
 def test_every_page_of_the_second_dashboard_answers(client, stay_months):
     meta = client.get("/api/stewardship/meta").json()
-    assert meta["dashboard"] == {"id": "stewardship", "title": STEWARDSHIP.title, "detail": False, "patient_level": True}
+    assert meta["dashboard"] == {"id": "stewardship", "title": STEWARDSHIP.title, "detail": False, "patient_level": True,
+                                 "aggregate": False}
     assert [f[0] for f in meta["filter_fields"]] == ["hospital", "unit", "age_band", "sex", "race_eth"]
     assert [d["id"] for d in meta["decisions"]["shared"]][-1] == "control_limits"
     overview = client.get("/api/stewardship/overview").json()

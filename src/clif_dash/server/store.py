@@ -86,18 +86,29 @@ class Store:
         self.row_tables = row_tables
         self.dashboard_filters = filters
         self.primary = row_tables[0]
+        # An aggregate export (src/clif_dash/export.py): cubes instead of patient rows, and no lists
+        self.aggregate = "aggregate" in self.summary
         self.tables: dict[str, pd.DataFrame] = {}
         self.displays: dict[str, pd.DataFrame] = {}
+        self.events: dict[str, pd.DataFrame] = {}     # aggregate exports: counted-event heatmaps, by heatmap id
+        for path in output.glob("heatmap__*.parquet") if self.aggregate else []:
+            self.events[path.stem.removeprefix("heatmap__")] = pd.read_parquet(path)
         for table in row_tables:
             rows = pd.read_parquet(output / f"{table.name}.parquet")
             if rows.empty:
                 rows = pd.DataFrame(columns=[table.id_column, "month"])
+            if self.aggregate:
+                self.tables[table.name] = rows
+                continue
             if table is row_tables[0] and not rows[table.id_column].is_unique:
                 raise ValueError(f"{output / table.name}.parquet: {table.id_column} is not unique, so the list, "
                                  "search and detail pages cannot tell rows apart")
             self.tables[table.name] = rows
             if not table.binned:
                 self.displays[table.name] = display_rows(rows, cfg.site_timezone).set_index(table.id_column, drop=False)
+        if self.aggregate:
+            self.search_text = pd.Series(dtype=str)
+            return
         primary_display = self.displays[self.primary.name]
         records = jsonable(primary_display.to_dict("records"))
         self.search_text = pd.Series(

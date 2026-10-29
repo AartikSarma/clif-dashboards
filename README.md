@@ -114,6 +114,17 @@ Rebuild after every update. If the code defines a measure your last build does n
 - `.gitignore` keeps site configs, parquet files, CSV downloads and logs out of git. Check `git status` before any commit all the same.
 - When you report a problem, never paste patient data: no rows, IDs, dates, free text or small counts. The [bug report template](.github/ISSUE_TEMPLATE/bug_report.md) says what to include instead.
 
+## Share aggregates on another server
+
+To show the dashboards to people who should not see patient data, build at the site as usual, export the aggregates, and serve the export somewhere else. The export holds no patient rows, IDs or dates: each table becomes sums and counts per month, hospital and ICU, medians come from fine histograms (exact to within about 1%), and the timelines, staged data and encounter mapping stay behind.
+
+```bash
+uv run clif-dash export --config config/my_site.yaml --out /path/to/aggregates   # at the site, after a build
+uv run clif-dash serve --aggregates /path/to/aggregates                         # on the shared server
+```
+
+The shared server offers the month, hospital and ICU filters and breakdowns; the sex, race and ethnicity, age band and dashboard-specific filters need patient-level splits and are left out. `--dimensions month hospital unit sex race_eth age_band` (or `--dimensions all`) keeps them, but crossing every filter leaves most cells holding a single patient, which then describes individuals without naming them. The export prints, for every table, how many cells hold a single row; read it before copying the folder anywhere. Small cells are not suppressed.
+
 ## Change a definition
 
 Every analytic choice lives in `config/decisions/`: thresholds, time windows, ventilator modes, antimicrobial agent lists, eligibility rules and targets. `platform.yaml` holds the choices every dashboard shares (adult age, encounter linking, outlier handling, time zone), and each dashboard has its own file, such as `respiratory.yaml`. Each measure's page shows these choices in its "How this is calculated" panel, read from the same files, so the page always matches what was computed.

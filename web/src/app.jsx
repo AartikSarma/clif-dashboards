@@ -444,7 +444,7 @@ function MetricPage({ id, F }) {
                   ))}</tbody>
                 </table>
               ) : <p className="muted small">This measure depends on no optional input.</p>}
-              <p className="small">Provenance: {META.meta.clifpy}; pipeline {META.meta.pipeline_version}; data folder <code>{META.meta.data_folder}</code>, built {META.meta.generated_at}.</p>
+              <p className="small">Provenance: {META.meta.clifpy}; pipeline {META.meta.pipeline_version}; {META.meta.data_folder ? <>data folder <code>{META.meta.data_folder}</code>, </> : ""}built {META.meta.generated_at}.</p>
               {patientLevel() && <button className="link" onClick={() => go("patients", `${routeId}|missed|1`)}>List {PRIMARY.unit_plural} {m.missedLabel === "missed" ? "that missed this measure" : `${m.missedLabel} use`} →</button>}
             </section>
           </div>
@@ -988,9 +988,13 @@ function AggregateOnly() {
   return (
     <section className="card">
       <h2>Aggregates only</h2>
-      <p>This server gives out aggregate results only, so lists of {PRIMARY.unit_plural} and patient timelines are off.
-        A site that needs them for its own review can set <code>patient_level_data: true</code> in its site config,
-        or start the server with <code>--patient-level</code>.</p>
+      {META.dashboard.aggregate
+        ? <p>This server holds an aggregate export: sums and counts for every combination of the filters, with no
+            patient rows, so there are no lists of {PRIMARY.unit_plural} or patient timelines to show. They exist only at
+            the site that built it.</p>
+        : <p>This server gives out aggregate results only, so lists of {PRIMARY.unit_plural} and patient timelines are off.
+            A site that needs them for its own review can set <code>patient_level_data: true</code> in its site config,
+            or start the server with <code>--patient-level</code>.</p>}
     </section>
   );
 }
@@ -1018,7 +1022,7 @@ function App({ dashboards }) {
           </div>
           <div>
             <div className="title">{META.dashboard.title}</div>
-            <div className="sub">{META.meta.site_name} · built {META.meta.generated_at} · CLIF
+            <div className="sub">{META.meta.site_name} · built {META.meta.generated_at}{META.dashboard.aggregate ? " · aggregate export" : ""} · CLIF
               {dashboards.length > 1 && <> · <a href="#/">All dashboards</a></>}
             </div>
           </div>

@@ -21,6 +21,7 @@ from ..config import SiteConfig
 from ..dashboard import Dashboard, FilterField, Metric, resolve_route
 from ..dashboards import DASHBOARDS
 from . import aggregate as agg
+from ..cube import row_count
 from .store import Filters, Store, jsonable
 
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -73,6 +74,8 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
     """One dashboard's API. `cfg` is bound to the dashboard. Without `patient_level`, the routes that
     return individual rows (/rows, /rows.csv, /detail) are not registered, so they answer 404."""
     store = Store(cfg, dashboard.row_tables, dashboard.filters)
+    if store.aggregate:
+        patient_level = False   # an aggregate export holds no patient rows to serve
     undefined = [m.id for m in dashboard.metrics if m.id not in store.decisions["metrics"]]
     if undefined:
         raise RuntimeError(f"The {dashboard.id} build in {cfg.dashboard_dir} has no decisions for "
@@ -104,7 +107,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
     def meta():
         return jsonable({
             "dashboard": {"id": dashboard.id, "title": dashboard.title, "detail": detail_builder is not None,
-                          "patient_level": patient_level},
+                          "patient_level": patient_level, "aggregate": store.aggregate},
             "row_tables": [t.public() for t in dashboard.row_tables],
             "meta": store.meta, "decisions": store.decisions, "data_quality": store.summary["data_quality"],
             "funnels": {t.name: funnel_for(t.name) for t in dashboard.row_tables},
@@ -112,7 +115,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
             "strata": [{"id": i, "label": label} for i, label in strata if i in store.primary_rows.columns],
             "completeness": [list(c) for c in completeness_flags],
             "filter_fields": [f.public() for f in filter_fields], "filter_options": store.filter_options(),
-            "n_total": int(len(store.primary_rows)),
+            "n_total": row_count(store.primary_rows),
             "heatmaps": [h.public(store.meta.get("heatmap_units")) for h in dashboard.heatmaps],
         })
 
@@ -124,11 +127,12 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
         for metric in metrics:
             rows = tables[metric.source]
             tiles[metric.id] = {"agg": agg.aggregate(metric, rows), "series": agg.monthly(metric, rows, months)}
-        return jsonable({**{f"n_{name}": len(rows) for name, rows in tables.items()}, "months": months, "tiles": tiles})
+        return jsonable({**{f"n_{name}": row_count(rows) for name, rows in tables.items()}, "months": months,
+                         "tiles": tiles})
 
     @router.get("/metric/{route_id}")
     def metric_page(route_id: str, request: Request, stratum: str = Query("unit")):
-        if stratum not in dict(strata):
+        if stratum not in dict(strata) or stratum not in store.primary_rows.columns:
             raise HTTPException(400, f"unknown stratum {stratum}")
         tables = filtered(request)
         metric, threshold, default = resolve(route_id)
@@ -149,7 +153,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
         parts = [{"key": k, "label": label, **agg.aggregate(Metric(metric.id, metric.source, "ratio", k, metric.denominator), rows)}
                  for k, label in metric.parts]
         primary_rows = tables[primary]
-        completeness = [{"key": k, "label": label, "n": int(primary_rows[k].sum()), "total": int(len(primary_rows))}
+        completeness = [{"key": k, "label": label, "n": int(primary_rows[k].sum()), "total": row_count(primary_rows)}
                         for k, label in completeness_flags if k in metric.needs]
         return jsonable({
             "metric": metric.public(), "threshold": threshold, "default_threshold": default,
@@ -235,7 +239,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
     @router.get("/count")
     def count(request: Request):
         """How many primary rows the filters keep: the rail's "n of N", an aggregate."""
-        return {"total": int(len(filtered(request)[primary]))}
+        return {"total": row_count(filtered(request)[primary])}
 
     def patient_route(path: str):
         """Register a route that returns individual rows only when patient-level data is on."""
@@ -293,10 +297,16 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
                                          chosen.denominator, chosen.scale)
         elif chosen.kind == "values":
             grid = agg.binned_by_month(rows, chosen.hour_column, chosen.numerator, chosen.denominator, chosen.scale)
-        elif by == "weekday":
-            grid = agg.hour_by_weekday(rows, chosen.time_column, cfg.site_timezone, chosen.where)
         else:
-            grid = agg.hour_by_month(rows, chosen.time_column, cfg.site_timezone, chosen.where)
+            if store.aggregate:
+                counts = filters.apply(store.events[chosen.id]) if chosen.id in store.events else \
+                    pd.DataFrame(columns=["month", "event_month", "weekday", "hour", "count"])
+                # As event_times: events after the last month their rows are attributed to are left out
+                if len(counts) and counts["month"].notna().any():
+                    counts = counts[counts["event_month"] <= counts["month"].max()]
+            else:
+                counts = agg.event_counts(agg.event_times(rows, chosen.time_column, cfg.site_timezone, chosen.where))
+            grid = agg.hour_by_weekday(counts) if by == "weekday" else agg.hour_by_month(counts)
         return jsonable({"heatmap": public, "by": by, **grid})
 
     @router.get("/quality")
@@ -308,9 +318,10 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard, patient_level: bool 
             cells = {}
             for unit in [None, *unit_names]:
                 unit_rows = rows if unit is None else rows[rows["unit"] == unit]
-                cells[unit or "__all__"] = round(100 * unit_rows[key].sum() / len(unit_rows)) if len(unit_rows) else None
+                cells[unit or "__all__"] = round(100 * unit_rows[key].sum() / row_count(unit_rows)) \
+                    if row_count(unit_rows) else None
             completeness.append({"key": key, "label": label, "cells": cells})
-        return jsonable({"units": unit_names, "completeness": completeness, "n_rows": len(rows),
+        return jsonable({"units": unit_names, "completeness": completeness, "n_rows": row_count(rows),
                          "n_with_height": int(rows["has_height"].sum()) if "has_height" in rows.columns else None})
 
     return router
