@@ -142,7 +142,8 @@ def test_every_measure_page_of_every_dashboard_answers(built):
             response = every.get(f"/api/{dashboard.id}/metric/{metric.id}")
             assert response.status_code == 200, (dashboard.id, metric.id)
             assert response.json()["funnel"], (dashboard.id, metric.id)
-            if dashboard is not RESPIRATORY:   # the synthetic data leaves proning empty
+            # The synthetic data leaves proning empty and has no influenza or other respiratory virus tests
+            if dashboard is not RESPIRATORY and response.json()["agg"].get("den") != 0:
                 assert response.json()["agg"]["value"] is not None, (dashboard.id, metric.id)
         for page in ("overview", "units", "quality", "rows"):
             assert every.get(f"/api/{dashboard.id}/{page}").status_code == 200, (dashboard.id, page)

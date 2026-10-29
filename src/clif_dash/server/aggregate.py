@@ -64,6 +64,61 @@ def aggregate(metric: Metric, rows: pd.DataFrame) -> dict:
             "q3": _finite(quartiles[2])}
 
 
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def event_times(rows: pd.DataFrame, time_column: str, tz: str, where: str | None = None) -> pd.Series:
+    """The local times of a table's events: rows with a time, and with `where` true if given, up to the
+    rows' last month (a transfer out in January for a November admission at the end of the data is left out)."""
+    if where is not None and len(rows):
+        rows = rows[rows[where].fillna(0).astype(bool)]
+    times = rows[time_column].dropna().dt.tz_convert(tz) if len(rows) else pd.Series(dtype="datetime64[ns, UTC]")
+    if len(times) and "month" in rows.columns and rows["month"].notna().any():
+        times = times[times.dt.strftime("%Y-%m") <= rows["month"].max()]
+    return times
+
+
+def days_by_weekday(first_month: str, last_month: str) -> list[int]:
+    """How many Mondays, Tuesdays, ... Sundays fall in the whole months from first_month to last_month."""
+    days = pd.date_range(pd.Period(first_month, "M").start_time, pd.Period(last_month, "M").end_time.normalize())
+    return pd.Series(days.dayofweek).value_counts().reindex(range(7), fill_value=0).astype(int).tolist()
+
+
+def hour_by_weekday(rows: pd.DataFrame, time_column: str, tz: str, where: str | None = None) -> dict:
+    """Events by day of week (7 rows, Monday first) and local hour (24 columns), over the months the events span.
+
+    `counts` are totals; `days` is how many of each weekday the period holds, so the
+    interface can show the average per day.
+    """
+    times = event_times(rows, time_column, tz, where)
+    if not len(times):
+        return {"weekdays": WEEKDAYS, "hours": list(range(24)), "counts": [[] for _ in range(7)], "days": [],
+                "period": [], "n": 0}
+    first, last = times.min().strftime("%Y-%m"), times.max().strftime("%Y-%m")
+    table = pd.crosstab(times.dt.dayofweek, times.dt.hour).reindex(index=range(7), columns=range(24), fill_value=0)
+    return {"weekdays": WEEKDAYS, "hours": list(range(24)), "counts": table.to_numpy().astype(int).tolist(),
+            "days": days_by_weekday(first, last), "period": [first, last], "n": int(table.to_numpy().sum())}
+
+
+def binned_by_weekday(rows: pd.DataFrame, weekday_column: str, hour_column: str, numerator: str, denominator: str,
+                      scale: float = 1.0) -> dict:
+    """Rows binned by day of week (0 = Monday) and hour: scale × Σ numerator ÷ Σ denominator per cell."""
+    if not len(rows) or not rows[denominator].fillna(0).gt(0).any():
+        return {"weekdays": WEEKDAYS, "hours": list(range(24)), "values": [[] for _ in range(7)],
+                "weights": [[] for _ in range(7)], "period": [], "n": 0}
+    rows = rows[rows[denominator].fillna(0) > 0]
+    sums = rows.groupby([weekday_column, hour_column])[[numerator, denominator]].sum()
+    shape = lambda column: sums[column].unstack(hour_column).reindex(index=range(7), columns=range(24)).fillna(0.0)
+    top, bottom = shape(numerator), shape(denominator)
+    values = (scale * top / bottom.where(bottom > 0)).round(4)
+    return {"weekdays": WEEKDAYS, "hours": list(range(24)),
+            "values": [[None if pd.isna(v) else float(v) for v in row] for row in values.to_numpy()],
+            "weights": bottom.round(2).to_numpy().tolist(), "n": float(round(bottom.to_numpy().sum(), 2)),
+            "period": [rows["month"].min(), rows["month"].max()],
+            "weekday_values": [None if not b else round(scale * t / b, 4)
+                               for t, b in zip(top.sum(axis=1), bottom.sum(axis=1))]}
+
+
 def hour_by_month(rows: pd.DataFrame, time_column: str, tz: str, where: str | None = None) -> dict:
     """Events by local hour of day (24 rows) and month (columns, every month from the first to the last).
 
@@ -72,11 +127,7 @@ def hour_by_month(rows: pd.DataFrame, time_column: str, tz: str, where: str | No
     (a transfer out in January for a November admission at the end of the data) are left
     out, so a sparse trailing month does not appear.
     """
-    if where is not None and len(rows):
-        rows = rows[rows[where].fillna(0).astype(bool)]
-    times = rows[time_column].dropna().dt.tz_convert(tz) if len(rows) else pd.Series(dtype="datetime64[ns, UTC]")
-    if len(times) and "month" in rows.columns and rows["month"].notna().any():
-        times = times[times.dt.strftime("%Y-%m") <= rows["month"].max()]
+    times = event_times(rows, time_column, tz, where)
     if not len(times):
         return {"months": [], "hours": list(range(24)), "counts": [[] for _ in range(24)], "totals": [], "n": 0}
     months = pd.period_range(times.min().strftime("%Y-%m"), times.max().strftime("%Y-%m"), freq="M").strftime("%Y-%m")

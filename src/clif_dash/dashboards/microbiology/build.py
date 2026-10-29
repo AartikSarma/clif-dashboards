@@ -16,6 +16,10 @@ rows for adult encounters with ICU time and the work runs in the main process:
    and whether a blood culture preceded each.
 6. First isolates per encounter and organism from cultures collected in the ICU,
    with methicillin, ceftriaxone and carbapenem results.
+7. Respiratory virus tests (microbiology_nonculture): one specimen per encounter and
+   collection time, placed in the ICU stay that contains it or begins within 48 h
+   after it, with tested and detected flags per virus group; each encounter's first
+   positive per group is a case on the stay-month rows.
 
 Rows are one encounter's days in one ICU at one hospital in one month, as for
 stewardship; antibiotic starts and isolates are secondary tables linked by row_id.
@@ -35,6 +39,8 @@ TABLES = ("microbiology_culture", "microbiology_nonculture", "microbiology_susce
           "medication_admin_intermittent")
 REQUIRED_TABLES = ("microbiology_culture",)
 STAY = ["encounter_block", "hospital", "unit", "month"]
+# Respiratory virus groups, each with a cases and a positivity measure; their organisms are a decision
+RESPIRATORY_GROUPS = ("sars_cov2", "influenza", "rsv", "other_respiratory_virus")
 
 
 def shared_values(decisions: dict) -> dict:
@@ -207,6 +213,51 @@ def cdi_events(con, cfg: SiteConfig, intervals: pd.DataFrame, encounters: pd.Dat
 
 
 # --------------------------------------------------------------------------- #
+# Respiratory viruses
+# --------------------------------------------------------------------------- #
+def respiratory_specimens(con, cfg: SiteConfig, intervals: pd.DataFrame, shared: dict) -> pd.DataFrame:
+    """One row per respiratory specimen (encounter and collection time) for an ICU stay, with
+    tested_<group> and detected_<group> per virus group, and the stay's hospital, unit and day.
+
+    A specimen belongs to the ICU row that contains its collection time, or else to the first
+    ICU row beginning within `respiratory_window_hours` after it, placed on that row's first day.
+    """
+    columns = ["encounter_block", "collect_dttm", "hospital", "unit", "day",
+               *[f"{k}_{g}" for g in RESPIRATORY_GROUPS for k in ("tested", "detected")]]
+    path = cfg.table_path("microbiology_nonculture")
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    groups = {g: [o.lower() for o in shared["respiratory_pathogens"].get(g, [])] for g in RESPIRATORY_GROUPS}
+    organisms = sql_list(sorted(set().union(*groups.values())))
+    rows = read(con, f"""
+        SELECT m.encounter_block, n.collect_dttm, lower(CAST(n.organism_category AS VARCHAR)) AS organism,
+               lower(CAST(n.result_category AS VARCHAR)) = 'detected' AS detected
+        FROM read_parquet('{path}') AS n
+        JOIN encounter_map AS m ON CAST(n.hospitalization_id AS VARCHAR) = m.hospitalization_id
+        WHERE n.collect_dttm IS NOT NULL AND lower(CAST(n.organism_category AS VARCHAR)) IN ({organisms})
+          AND (n.fluid_category IS NULL
+               OR lower(CAST(n.fluid_category AS VARCHAR)) IN ({sql_list(shared["respiratory_specimen"])}))
+    """)
+    if rows.empty:
+        return pd.DataFrame(columns=columns)
+    for group, members in groups.items():
+        rows[f"tested_{group}"] = rows["organism"].isin(members)
+        rows[f"detected_{group}"] = rows[f"tested_{group}"] & rows["detected"].fillna(False).astype(bool)
+    flags = [c for c in columns if c.startswith(("tested_", "detected_"))]
+    specimens = rows.groupby(["encounter_block", "collect_dttm"])[flags].any().astype(int).reset_index()
+    window = pd.Timedelta(hours=shared["respiratory_window_hours"])
+    candidates = specimens.merge(intervals, on="encounter_block")
+    candidates = candidates[(candidates["in_dttm"] - window <= candidates["collect_dttm"])
+                            & (candidates["collect_dttm"] < candidates["out_dttm"])]
+    candidates = candidates.sort_values(["encounter_block", "collect_dttm", "in_dttm"], kind="stable") \
+        .drop_duplicates(["encounter_block", "collect_dttm"])
+    placed_at = candidates["collect_dttm"].where(candidates["collect_dttm"] >= candidates["in_dttm"],
+                                                 candidates["in_dttm"])
+    candidates["day"] = placed_at.dt.tz_convert(cfg.site_timezone).dt.normalize().dt.tz_localize(None)
+    return candidates[columns].reset_index(drop=True)
+
+
+# --------------------------------------------------------------------------- #
 # New antibacterial starts
 # --------------------------------------------------------------------------- #
 def antibacterial_starts(con, cfg: SiteConfig, values: dict) -> pd.DataFrame:
@@ -327,7 +378,12 @@ def build(site: SiteBuild) -> BuildResult:
     starts["cultured"] = starts.set_index(["encounter_block", "start_dttm"]).index.isin(
         cultured.set_index(["encounter_block", "start_dttm"]).index).astype(int)
     found = isolates(con, cfg, culture_rows, intervals, decisions).merge(counted_day, on=DAY_KEY)
+    specimens = respiratory_specimens(con, cfg, intervals, shared).merge(counted_day, on=DAY_KEY)
     con.unregister("encounter_map")
+    # A case: each encounter's first positive specimen for a virus group
+    cases = [specimens[specimens[f"detected_{g}"] == 1].sort_values("collect_dttm", kind="stable")
+             .drop_duplicates("encounter_block").groupby(DAY_KEY).size().rename(f"{g}_cases")
+             for g in RESPIRATORY_GROUPS]
 
     def per_day(events: pd.DataFrame, column: str, value: str | None = None) -> pd.Series:
         counted = events if value is None else events[events[value].astype(bool)]
@@ -335,8 +391,9 @@ def build(site: SiteBuild) -> BuildResult:
 
     daily = pd.concat([per_day(blood, "blood_draws"), per_day(blood, "contaminated_draws", "contaminated"),
                        per_day(urine, "urine_draws"), per_day(hob, "hob_events"),
-                       cdi.groupby(DAY_KEY).size().rename("cdi_events")], axis=1).reset_index()
-    counts = ["blood_draws", "contaminated_draws", "urine_draws", "hob_events", "cdi_events"]
+                       cdi.groupby(DAY_KEY).size().rename("cdi_events"), *cases], axis=1).reset_index()
+    counts = ["blood_draws", "contaminated_draws", "urine_draws", "hob_events", "cdi_events",
+              *[f"{g}_cases" for g in RESPIRATORY_GROUPS]]
     days = days.merge(daily, on=DAY_KEY, how="left") if len(daily) else days.assign(**{c: 0 for c in counts})
     days[counts] = days[counts].fillna(0).astype(int)
     days["month"] = days["day"].dt.strftime("%Y-%m")
@@ -367,6 +424,8 @@ def build(site: SiteBuild) -> BuildResult:
     start_rows = linked(starts.assign(start_time=starts["start_dttm"]), ["start_time", "cultured"])
     isolate_rows = linked(found.assign(collected=found["collect_dttm"]),
                           ["organism", "collected", *[c for c in found.columns if c.endswith(("_num", "_den"))]])
+    specimen_rows = linked(specimens.assign(collected=specimens["collect_dttm"]),
+                           ["collected", *[c for c in specimens.columns if c.startswith(("tested_", "detected_"))]])
 
     funnel = [
         {"step": "Encounters after linking", "n": int(len(encounters))},
@@ -378,9 +437,11 @@ def build(site: SiteBuild) -> BuildResult:
         {"step": "Days present", "n": int(rows["days_present"].sum()), "unit": "days"},
     ]
     log(f"{len(rows):,} stay-months; {int(rows['blood_draws'].sum()):,} blood culture draws; "
-        f"{len(start_rows):,} antibacterial starts; {len(isolate_rows):,} first isolates")
+        f"{len(start_rows):,} antibacterial starts; {len(isolate_rows):,} first isolates; "
+        f"{len(specimen_rows):,} respiratory virus specimens")
     return BuildResult(
-        tables={"stay_months": rows, "antibiotic_starts": start_rows, "isolates": isolate_rows},
+        tables={"stay_months": rows, "antibiotic_starts": start_rows, "isolates": isolate_rows,
+                "respiratory_specimens": specimen_rows},
         summary={"funnel": funnel},
         meta={"months": sorted(rows["month"].unique().tolist())},
         data_quality={"icu_rows_without_end": unended,

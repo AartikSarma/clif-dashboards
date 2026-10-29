@@ -225,8 +225,8 @@ def interval_hours_sql(intervals: str, first_day, last_day) -> str:
     `intervals` is SQL giving encounter_block, kind, rate, start_dttm, end_dttm; each is
     clipped to the ICU rows it overlaps and split at local clock hours, and only hours on
     local days from `first_day` to `last_day` count. Gives encounter_block, hospital, unit,
-    month, hour, kind, hours, and rate_hours and rated_hours (hours × rate and hours, over
-    pieces with a known rate). Run inside `icu_session`.
+    month, weekday, hour, kind, hours, and rate_hours and rated_hours (hours × rate and hours, over
+    pieces with a known rate), with weekday 0 for Monday. Run inside `icu_session`.
     """
     return f"""
         WITH clipped AS (
@@ -247,7 +247,8 @@ def interval_hours_sql(intervals: str, first_day, last_day) -> str:
             FROM binned
             WHERE CAST(bin AS DATE) BETWEEN DATE '{first_day:%Y-%m-%d}' AND DATE '{last_day:%Y-%m-%d}'
         )
-        SELECT encounter_block, hospital, unit, strftime(bin, '%Y-%m') AS month, hour(bin) AS hour, kind,
+        SELECT encounter_block, hospital, unit, strftime(bin, '%Y-%m') AS month, isodow(bin) - 1 AS weekday,
+               hour(bin) AS hour, kind,
                sum(hours) AS hours, sum(hours * rate) FILTER (WHERE rate IS NOT NULL) AS rate_hours,
                sum(hours) FILTER (WHERE rate IS NOT NULL) AS rated_hours
         FROM pieces GROUP BY ALL

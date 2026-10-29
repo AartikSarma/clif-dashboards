@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { scaleLinear } from "d3-scale";
 import { line as d3line, curveStepAfter } from "d3-shape";
 import { fmt, status, statusLabel } from "./format.js";
-import { Sparkline, RunChart, BarBreakdown, StrataLines, Funnel, Lane, HourMonthHeatmap, useWidth, monthLabel } from "./charts.jsx";
+import { Sparkline, RunChart, BarBreakdown, StrataLines, Funnel, Lane, HourMonthHeatmap, WeekHourHeatmap, useWidth, monthLabel } from "./charts.jsx";
 import "./styles.css";
 
 let DASH = null; // id of the dashboard on screen
@@ -825,37 +825,50 @@ function Timeline({ F, arg }) {
 // ----------------------------------------------------------------------------
 // Time of day: when events happen, by hour (rows) and month (columns)
 // ----------------------------------------------------------------------------
-function HeatmapCard({ heatmap, F, share }) {
-  const state = useApi(`${api(`/heatmap/${heatmap.id}`)}${query(F)}`);
+function HeatmapCard({ heatmap, F, share, by }) {
+  const state = useApi(`${api(`/heatmap/${heatmap.id}`)}${query(F, { by })}`);
   return (
     <section className="card">
       <div className="card-head"><h2>{heatmap.title}</h2></div>
       {heatmap.note && <p className="muted">{heatmap.note}</p>}
       <Loading state={state}>{(data) => data.n
         ? <>{data.heatmap.unfiltered.length > 0 && <p className="muted">Not filtered by {data.heatmap.unfiltered.join(", ").toLowerCase()}: this heatmap is built without them.</p>}
-          <HourMonthHeatmap data={data} share={share} event={heatmap.event} unit={heatmap.unit} floor={heatmap.floor} /></>
+          {data.by === "weekday"
+            ? <><p className="muted">{monthLabel(data.period[0])} to {monthLabel(data.period[1])}; set From and To to choose the period.</p>
+                <WeekHourHeatmap data={data} share={share} event={heatmap.event} unit={heatmap.unit} floor={heatmap.floor} /></>
+            : <HourMonthHeatmap data={data} share={share} event={heatmap.event} unit={heatmap.unit} floor={heatmap.floor} />}</>
         : <p className="empty">No {heatmap.event} under the current filters.</p>}</Loading>
     </section>
   );
 }
 
-function TimeOfDay({ F }) {
+function TimeOfDay({ F, arg }) {
   const [share, setShare] = useState(true);
+  const by = arg === "weekday" ? "weekday" : "month";   // the layout is in the route: #/<dashboard>/timeofday/weekday
+  const setBy = (layout) => go("timeofday", layout === "weekday" ? "weekday" : undefined);
   return (
     <div>
       <div className="page-head">
         <h1>Time of day</h1>
-        <p className="lede">Each column is a month and each row an hour of the day, in site time. For counted events, "% of month"
-          shows what share of that month's events fell in each hour, so busy and quiet months compare fairly, and "Count" shows
-          the numbers. Rates and shares of time are shown as they are. The bars on the right cover every month shown.</p>
+        <p className="lede">{by === "month"
+          ? <>Each column is a month and each row an hour of the day, in site time. For counted events, "% of month" shows what
+            share of that month's events fell in each hour, so busy and quiet months compare fairly, and "Count" shows the numbers.
+            Rates and shares of time are shown as they are. The bars on the right cover every month shown.</>
+          : <>Each row is a day of the week and each column an hour, in site time, over the months the From and To filters select.
+            For counted events, "Per day" is the average on that weekday (the count divided by how many of that weekday the
+            period holds) and "% of all" is each cell's share of every event shown. The bars on the right cover the whole day.</>}</p>
       </div>
-      {META.heatmaps.some((h) => h.kind === "events") && <div className="seg" style={{ marginBottom: 12 }}>
-        <div className="toggle" role="tablist">
-          <button className={share ? "on" : ""} onClick={() => setShare(true)}>% of month</button>
-          <button className={share ? "" : "on"} onClick={() => setShare(false)}>Count</button>
+      <div className="seg" style={{ marginBottom: 12 }}>
+        <div className="toggle" role="tablist" aria-label="Layout">
+          <button className={by === "month" ? "on" : ""} onClick={() => setBy("month")}>Hour by month</button>
+          <button className={by === "weekday" ? "on" : ""} onClick={() => setBy("weekday")}>Day of week by hour</button>
         </div>
-      </div>}
-      {META.heatmaps.map((h) => <HeatmapCard key={h.id} heatmap={h} F={F} share={share} />)}
+        {META.heatmaps.some((h) => h.kind === "events") && <div className="toggle" role="tablist" aria-label="Events as">
+          <button className={share ? "on" : ""} onClick={() => setShare(true)}>{by === "month" ? "% of month" : "% of all"}</button>
+          <button className={share ? "" : "on"} onClick={() => setShare(false)}>{by === "month" ? "Count" : "Per day"}</button>
+        </div>}
+      </div>
+      {META.heatmaps.map((h) => <HeatmapCard key={h.id} heatmap={h} F={F} share={share} by={by} />)}
     </div>
   );
 }
@@ -1014,7 +1027,7 @@ function App({ dashboards }) {
           {(route_.page === "units" || route_.page === "hospitals") && <Comparison F={F} by={route_.page} key={route_.page} />}
           {route_.page === "patients" && <Patients F={F} arg={route_.arg} />}
           {route_.page === "timeline" && detailView() && detailView().view({ F, arg: route_.arg })}
-          {route_.page === "timeofday" && (META.heatmaps || []).length > 0 && <TimeOfDay F={F} />}
+          {route_.page === "timeofday" && (META.heatmaps || []).length > 0 && <TimeOfDay F={F} arg={route_.arg} />}
           {route_.page === "quality" && <Quality F={F} />}
         </main>
       </div>

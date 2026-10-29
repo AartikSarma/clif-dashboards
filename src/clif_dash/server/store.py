@@ -96,7 +96,8 @@ class Store:
                 raise ValueError(f"{output / table.name}.parquet: {table.id_column} is not unique, so the list, "
                                  "search and detail pages cannot tell rows apart")
             self.tables[table.name] = rows
-            self.displays[table.name] = display_rows(rows, cfg.site_timezone).set_index(table.id_column, drop=False)
+            if not table.binned:
+                self.displays[table.name] = display_rows(rows, cfg.site_timezone).set_index(table.id_column, drop=False)
         primary_display = self.displays[self.primary.name]
         records = jsonable(primary_display.to_dict("records"))
         self.search_text = pd.Series(

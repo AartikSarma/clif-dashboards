@@ -33,6 +33,29 @@ shared:
     alternatives: [Midnight census]
     source: NHSN (patient days, location level)
 
+  - id: respiratory_pathogens
+    label: Respiratory viruses
+    value:
+      sars_cov2: [sars_cov2]
+      influenza: [influenza_a, influenza_a_h1, influenza_a_h1_2009, influenza_a_h3, influenza_b]
+      rsv: [respiratory_syncytial_virus]
+      other_respiratory_virus: [adenovirus, human_metapneumovirus, human_rhinovirus_enterovirus, parainfluenza_1, parainfluenza_2, parainfluenza_3, parainfluenza_4, coronavirus_229e, coronavirus_hku1, coronavirus_nl63, coronavirus_oc43]
+    display: "microbiology_nonculture results by organism_category: SARS-CoV-2; influenza A (any subtype) and B; RSV; and other respiratory viruses (adenovirus, human metapneumovirus, rhinovirus/enterovirus, parainfluenza 1-4, seasonal coronaviruses). CLIF 2.1 lists only SARS-CoV-2 and RSV, so influenza and the other viruses need CLIF 3.0's categories"
+    alternatives: [Add atypical bacteria (Mycoplasma, Chlamydia, Bordetella)]
+    source: CLIF 3.0 microbiology_nonculture mCIDE
+  - id: respiratory_specimen
+    label: Respiratory specimen
+    value: [nasopharynx_upperairway, oropharynx_tongue_oralcavity, respiratory_tract, respiratory_tract_lower, larynx, sinuses]
+    display: "A respiratory virus test is a collection time with one or more of these results, from the upper or lower respiratory tract by fluid_category, or with no fluid recorded; a multiplex panel is one specimen however many viruses it reports"
+    alternatives: []
+    source: CLIF microbiology_nonculture mCIDE
+  - id: respiratory_window_hours
+    label: Tests before the ICU
+    value: 48
+    display: "A test counts for an ICU stay when it was collected during the stay or in the 48 h before it (the ED or ward, before transfer), and is placed on the first ICU day; later tests on the day they were collected"
+    alternatives: [ICU only]
+    source: Local choice
+
   - id: culture_coverage
     label: Months counted
     value: whole_months
@@ -357,6 +380,108 @@ metrics:
         alternatives: []
         source: Local choice, after CLSI M39
 
+  sars_cov2_cases:
+    number: M10
+    domain: Respiratory virus cases
+    title: ICU patients with SARS-CoV-2 per 1,000 days present
+    short: SARS-CoV-2 cases
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: neutral
+    target: null
+    numerator: Encounters whose first positive SARS-CoV-2 test was collected in the ICU or in the 48 h before it, counted once per encounter
+    denominator: Days present in the ICU
+    decisions: []
+
+  influenza_cases:
+    number: M11
+    domain: Respiratory virus cases
+    title: ICU patients with influenza per 1,000 days present
+    short: Influenza cases
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: neutral
+    target: null
+    numerator: Encounters whose first positive influenza test was collected in the ICU or in the 48 h before it, counted once per encounter
+    denominator: Days present in the ICU
+    decisions: []
+
+  rsv_cases:
+    number: M12
+    domain: Respiratory virus cases
+    title: ICU patients with RSV per 1,000 days present
+    short: RSV cases
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: neutral
+    target: null
+    numerator: Encounters whose first positive RSV test was collected in the ICU or in the 48 h before it, counted once per encounter
+    denominator: Days present in the ICU
+    decisions: []
+
+  other_respiratory_virus_cases:
+    number: M13
+    domain: Respiratory virus cases
+    title: ICU patients with other respiratory viruses per 1,000 days present
+    short: Other respiratory viruses cases
+    unit: per 1,000 days present
+    unit_short: /1k days
+    direction: neutral
+    target: null
+    numerator: Encounters whose first positive other respiratory viruses test was collected in the ICU or in the 48 h before it, counted once per encounter
+    denominator: Days present in the ICU
+    decisions: []
+
+  sars_cov2_positivity:
+    number: M14
+    domain: Respiratory virus test positivity
+    title: Positive SARS-CoV-2 tests
+    short: SARS-CoV-2 positivity
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: Respiratory specimens with SARS-CoV-2 detected
+    denominator: Respiratory specimens tested for SARS-CoV-2 in the ICU or in the 48 h before it
+    decisions: []
+
+  influenza_positivity:
+    number: M15
+    domain: Respiratory virus test positivity
+    title: Positive influenza tests
+    short: Influenza positivity
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: Respiratory specimens with influenza detected
+    denominator: Respiratory specimens tested for influenza in the ICU or in the 48 h before it
+    decisions: []
+
+  rsv_positivity:
+    number: M16
+    domain: Respiratory virus test positivity
+    title: Positive RSV tests
+    short: RSV positivity
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: Respiratory specimens with RSV detected
+    denominator: Respiratory specimens tested for RSV in the ICU or in the 48 h before it
+    decisions: []
+
+  other_respiratory_virus_positivity:
+    number: M17
+    domain: Respiratory virus test positivity
+    title: Positive other respiratory viruses tests
+    short: Other respiratory viruses positivity
+    unit: "%"
+    direction: neutral
+    target: null
+    numerator: Respiratory specimens with other respiratory viruses detected
+    denominator: Respiratory specimens tested for other respiratory viruses in the ICU or in the 48 h before it
+    decisions: []
+
 changelog:
   - date: 2026-10-27
     change: Initial definitions
+  - date: 2026-10-29
+    change: Respiratory virus cases and test positivity (SARS-CoV-2, influenza, RSV, other respiratory viruses) for seasonal trends

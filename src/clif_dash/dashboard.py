@@ -202,6 +202,7 @@ class RowTable:
     id_column: str
     unit: str                    # what one row is: "IMV episode"
     unit_plural: str             # "IMV episodes"
+    binned: bool = False         # aggregated bins for heatmaps, not patient rows: no list, detail or display copy
 
     def public(self) -> dict:
         return {"name": self.name, "id_column": self.id_column, "unit": self.unit, "unit_plural": self.unit_plural}
@@ -215,9 +216,13 @@ class Heatmap:
     the hour and month of that time; with `where`, only rows whose `where` column is true or
     non-zero count. Cells are counts, or each month's share.
 
-    Values (`hour_column`): rows already binned by local hour of day (that column) and
-    `month`; each cell is scale × Σ numerator ÷ Σ denominator, a mean rate or a share of
-    time, shown in `unit` (or the unit the build records under meta["heatmap_units"][id]).
+    Values (`hour_column`): rows already binned by local hour of day (that column), day of
+    week (`weekday_column`) and `month`; each cell is scale × Σ numerator ÷ Σ denominator, a
+    mean rate or a share of time, shown in `unit` (or the unit the build records under
+    meta["heatmap_units"][id]).
+
+    Each heatmap is shown two ways: hour by month, and day of week by hour over the months
+    the filters select.
     """
     id: str
     title: str
@@ -226,6 +231,7 @@ class Heatmap:
     time_column: str | None = None
     where: str | None = None
     hour_column: str | None = None
+    weekday_column: str | None = None   # values: the day of week (0 = Monday) the rows are also binned by
     numerator: str | None = None
     denominator: str | None = None
     scale: float = 1.0

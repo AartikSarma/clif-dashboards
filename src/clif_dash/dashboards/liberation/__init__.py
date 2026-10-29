@@ -6,26 +6,27 @@ from . import build
 
 STAY_MONTHS = RowTable("stay_months", "row_id", "ICU stay-month", "ICU stay-months")
 # Hours by month, hospital, unit and hour of day, for the Time of day page (no measures; no demographics)
-SEDATION_HOURS = RowTable("sedation_hours", "row_id", "hour-of-day bin", "hour-of-day bins")
+SEDATION_HOURS = RowTable("sedation_hours", "row_id", "hour-of-day bin", "hour-of-day bins", binned=True)
 DRUG_NAMES = {"propofol": "Propofol", "dexmedetomidine": "Dexmedetomidine", "midazolam": "Midazolam",
               "lorazepam": "Lorazepam", "ketamine": "Ketamine", "fentanyl": "Fentanyl",
               "hydromorphone": "Hydromorphone", "morphine": "Morphine"}
 HEATMAPS = (
-    Heatmap("sedative_time", "Continuous sedative running", "sedation_hours", "ICU hours", hour_column="hour",
-            numerator="sedative_hours", denominator="icu_hours", scale=100, unit="% of ICU time",
+    Heatmap("sedative_time", "Continuous sedative running", "sedation_hours", "ICU hours", hour_column="hour", weekday_column="weekday",
+            numerator="sedative_hours", denominator="icu_hours", scale=100, unit="% of ICU time", floor=None,
             note="The share of ICU time in each hour with any continuous sedative running (propofol, midazolam, "
                  "lorazepam, dexmedetomidine, ketamine; opioids alone are not counted). This is the view that shows "
                  "when patients are sedated."),
-    Heatmap("rass_mean", "Mean RASS", "sedation_hours", "RASS readings", hour_column="hour",
+    Heatmap("rass_mean", "Mean RASS", "sedation_hours", "RASS readings", hour_column="hour", weekday_column="weekday",
             numerator="rass_sum", denominator="rass_readings", unit="RASS", floor=None,
             note="The mean of the RASS readings recorded in each hour, leaving out readings during a paralytic "
                  "infusion, as the light-sedation measure does. Lower is deeper sedation; the colours run from the "
                  "lowest mean shown to the highest."),
-    Heatmap("rass_target", "RASS in the target range", "sedation_hours", "RASS readings", hour_column="hour",
-            numerator="rass_in_range", denominator="rass_readings", scale=100, unit="% of readings",
+    Heatmap("rass_target", "RASS in the target range", "sedation_hours", "RASS readings", hour_column="hour", weekday_column="weekday",
+            numerator="rass_in_range", denominator="rass_readings", scale=100, unit="% of readings", floor=None,
             note="The share of RASS readings from −2 to +1 (the light-sedation measure's range) in each hour."),
     *(Heatmap(f"{drug}_rate", f"{DRUG_NAMES[drug]} infusion rate", "sedation_hours", f"{drug} infusion hours",
-              hour_column="hour", numerator=f"{drug}_rate_hours", denominator=f"{drug}_rated_hours",
+              hour_column="hour", weekday_column="weekday", numerator=f"{drug}_rate_hours", denominator=f"{drug}_rated_hours",
+              floor=None,
               note=f"The mean charted {drug} infusion rate while it was running, weighted by time. It is the "
                    "charted rate, not the drug delivered; read it beside how many infusion hours each cell holds.")
       for drug in build.DOSE_DRUGS),

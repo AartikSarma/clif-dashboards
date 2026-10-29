@@ -250,7 +250,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         ids = store.displays[primary][id_column]
         position = int((ids == row_id).to_numpy().argmax())
         related = {}
-        for table in dashboard.row_tables[1:]:
+        for table in (t for t in dashboard.row_tables[1:] if not t.binned):
             match = store.displays[table.name][store.displays[table.name][id_column] == row_id]
             related[table.name] = match.iloc[0].to_dict() if len(match) else None
         return jsonable({
@@ -260,7 +260,7 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         })
 
     @router.get("/heatmap/{heatmap_id}")
-    def heatmap(heatmap_id: str, request: Request):
+    def heatmap(heatmap_id: str, request: Request, by: str = Query("month", pattern="^(month|weekday)$")):
         chosen = next((h for h in dashboard.heatmaps if h.id == heatmap_id), None)
         if chosen is None:
             raise HTTPException(404, f"no heatmap {heatmap_id}")
@@ -270,11 +270,16 @@ def dashboard_routes(cfg: SiteConfig, dashboard: Dashboard) -> APIRouter:
         public = {**chosen.public(store.meta.get("heatmap_units")),
                   "unfiltered": [f.label for f in filter_fields
                                  if f.column not in rows.columns and (f.column in filters.values or f.column in filters.flags)]}
-        if chosen.kind == "values":
-            return jsonable({"heatmap": public, **agg.binned_by_month(rows, chosen.hour_column, chosen.numerator,
-                                                                      chosen.denominator, chosen.scale)})
-        return jsonable({"heatmap": public, **agg.hour_by_month(rows, chosen.time_column, cfg.site_timezone,
-                                                                chosen.where)})
+        if chosen.kind == "values" and by == "weekday":
+            grid = agg.binned_by_weekday(rows, chosen.weekday_column, chosen.hour_column, chosen.numerator,
+                                         chosen.denominator, chosen.scale)
+        elif chosen.kind == "values":
+            grid = agg.binned_by_month(rows, chosen.hour_column, chosen.numerator, chosen.denominator, chosen.scale)
+        elif by == "weekday":
+            grid = agg.hour_by_weekday(rows, chosen.time_column, cfg.site_timezone, chosen.where)
+        else:
+            grid = agg.hour_by_month(rows, chosen.time_column, cfg.site_timezone, chosen.where)
+        return jsonable({"heatmap": public, "by": by, **grid})
 
     @router.get("/quality")
     def quality(request: Request):

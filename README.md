@@ -4,7 +4,7 @@ ICU quality-improvement dashboards computed from a site's own [CLIF](https://cli
 
 - **Respiratory failure**: lung-protective ventilation, proning, liberation, sedation and outcomes for adults on invasive mechanical ventilation.
 - **Antimicrobial stewardship**: NHSN-style days of therapy per 1,000 days present by ICU, for all antibacterials, the NHSN agent groups and anti-anaerobic agents, and duplicative anaerobic coverage.
-- **Microbiology**: blood and urine culture use, blood culture contamination, cultures before new antibiotics, hospital-onset bacteremia and C. difficile, and resistance in S. aureus and gram-negative isolates.
+- **Microbiology**: blood and urine culture use, blood culture contamination, cultures before new antibiotics, hospital-onset bacteremia and C. difficile, resistance in S. aureus and gram-negative isolates, and respiratory viruses for seasonal trends: ICU cases per 1,000 days present and test positivity for SARS-CoV-2, influenza, RSV and other respiratory viruses (influenza and the other viruses need CLIF 3.0's categories).
 - **Fluids**: input volume per ICU day by CLIF 3.0 input group (IV fluids, crystalloid, colloid, blood products, nutrition, medication fluids, renal replacement fluids, flushes), by ICU and month.
 - **ICU flow**: readmission within 48 h, night transfers out, ICU length of stay, time from ED arrival to ICU, and where ICU stays end, from ADT alone.
 - **Glycemic control**: ICU days with glucose below 40 and 70 mg/dL or above 300, days with a mean in range, hypoglycemia on insulin infusions, and insulin and glucose-monitoring days.
@@ -90,7 +90,7 @@ uv run clif-dash serve --config config/my_site.yaml
 
 Open http://127.0.0.1:8000 in a browser on the same machine. With more than one dashboard built, the first page lists them; each dashboard's header links back to that list. The server reads the built tables when it starts, so restart it (Ctrl-C, then the same command) after every build.
 
-The flow, respiratory, microbiology and liberation dashboards also have a **Time of day** page: heatmaps by hour of day and month of ICU admissions and transfers out, intubations and extubations, new antibiotic starts, and (liberation) the share of ICU time on a continuous sedative, mean RASS and RASS in the target range, and each sedative's and opioid's mean infusion rate, converted to one unit per drug with clifpy's dose converter.
+The flow, respiratory, microbiology and liberation dashboards also have a **Time of day** page: heatmaps by hour of day and month of ICU admissions and transfers out, intubations and extubations, new antibiotic starts, and (liberation) the share of ICU time on a continuous sedative, mean RASS and RASS in the target range, and each sedative's and opioid's mean infusion rate, converted to one unit per drug with clifpy's dose converter. Each heatmap can be shown by hour and month, or by day of week and hour over the months the From and To filters select.
 
 Start with each dashboard's **Data quality** page. It shows what your data can and cannot support, so that a gap in documentation is not mistaken for a gap in practice.
 

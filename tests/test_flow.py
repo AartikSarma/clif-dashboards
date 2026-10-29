@@ -114,3 +114,14 @@ def test_heatmaps_count_events_by_local_hour_and_month(built_site):
     transfers = client.get("/api/flow/heatmap/transfer_out").json()   # H1 at 23:30, H2 at 15:00
     assert {h: row[0] for h, row in enumerate(transfers["counts"]) if row[0]} == {15: 1, 23: 1}
     assert client.get("/api/flow/heatmap/nothing").status_code == 404
+
+
+def test_heatmaps_by_day_of_week(built_site):
+    cfg, _ = built_site
+    client = TestClient(create_app(cfg, [FLOW]))
+    admissions = client.get("/api/flow/heatmap/icu_admission", params={"by": "weekday"}).json()
+    # Wed Jan 10 14:00, Fri Jan 5 08:00, Sat Jan 20 08:00, Wed Jan 31 23:00 (local); January 2024 starts on a Monday
+    cells = {(d, h): n for d, row in enumerate(admissions["counts"]) for h, n in enumerate(row) if n}
+    assert cells == {(2, 14): 1, (2, 23): 1, (4, 8): 1, (5, 8): 1}
+    assert admissions["days"] == [5, 5, 5, 4, 4, 4, 4] and admissions["period"] == ["2024-01", "2024-01"]
+    assert client.get("/api/flow/heatmap/icu_admission", params={"by": "year"}).status_code == 422

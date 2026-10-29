@@ -97,6 +97,22 @@ def write_site(folder: Path) -> Path:
     ], columns=["hospitalization_id", "collect_dttm"])
     nonculture["collect_dttm"] = nonculture["collect_dttm"].map(local)
     nonculture["organism_category"], nonculture["result_category"] = "clostridium_difficile", "detected"
+    nonculture["fluid_category"] = "feces_stool"
+    respiratory = pd.DataFrame([
+        # H1: a negative SARS-CoV-2 test 3 h before the ICU (placed on the first ICU day, Mar 1), influenza A in the ICU
+        ("H1", "2024-03-01 07:00", "sars_cov2", "not_detected", "nasopharynx_upperairway"),
+        ("H1", "2024-03-05 09:00", "influenza_a", "detected", "respiratory_tract"),
+        ("H1", "2024-03-06 09:00", "sars_cov2", "detected", "feces_stool"),          # not a respiratory specimen
+        # H2: a multiplex panel on the ward 23 h before the ICU, SARS-CoV-2 positive and RSV negative (one specimen,
+        # one case); positive again in the ICU (a second specimen, not a second case)
+        ("H2", "2024-03-02 09:00", "sars_cov2", "detected", "nasopharynx_upperairway"),
+        ("H2", "2024-03-02 09:00", "respiratory_syncytial_virus", "not_detected", "nasopharynx_upperairway"),
+        ("H2", "2024-03-04 09:00", "sars_cov2", "detected", "nasopharynx_upperairway"),
+        # H4: 73 h before the ICU: too early to count
+        ("H4", "2024-04-07 09:00", "influenza_b", "detected", "nasopharynx_upperairway"),
+    ], columns=["hospitalization_id", "collect_dttm", "organism_category", "result_category", "fluid_category"])
+    respiratory["collect_dttm"] = respiratory["collect_dttm"].map(local)
+    nonculture = pd.concat([nonculture, respiratory], ignore_index=True)
     nonculture["method_category"] = "pcr"
 
     doses = [
@@ -134,7 +150,8 @@ def write_site(folder: Path) -> Path:
 @pytest.fixture(scope="module")
 def built_site(tmp_path_factory):
     output = build(load_config(write_site(tmp_path_factory.mktemp("microbiology_site"))), MICROBIOLOGY)
-    return {name: pd.read_parquet(output / f"{name}.parquet") for name in ("stay_months", "antibiotic_starts", "isolates")}
+    return {name: pd.read_parquet(output / f"{name}.parquet")
+            for name in ("stay_months", "antibiotic_starts", "isolates", "respiratory_specimens")}
 
 
 COUNTS = ["days_present", "blood_draws", "contaminated_draws", "urine_draws", "hob_events", "cdi_events"]
@@ -177,3 +194,22 @@ def test_the_antibacterial_list_matches_stewardship():
         decisions = yaml.safe_load((REPO / "config" / "decisions" / f"{name}.yaml").read_text())
         return next(d["value"] for d in decisions["metrics"][measure]["decisions"] if d["id"] == "agents")
     assert agents("microbiology", "cultures_before_antibiotics") == agents("stewardship", "all_antibacterial")
+
+
+def test_respiratory_virus_specimens_and_cases(built_site):
+    specimens = built_site["respiratory_specimens"].set_index(["label_id", "collected"]).sort_index()
+    columns = ["tested_sars_cov2", "detected_sars_cov2", "tested_influenza", "detected_influenza",
+               "tested_rsv", "detected_rsv"]
+    expected = {
+        ("H1", "Medical ICU", "2024-03-01"): [1, 0, 0, 0, 0, 0],
+        ("H1", "Medical ICU", "2024-03-05"): [0, 0, 1, 1, 0, 0],
+        ("H2", "Surgical ICU", "2024-03-02"): [1, 1, 0, 0, 1, 0],   # on the ward, placed in the ICU stay that follows
+        ("H2", "Surgical ICU", "2024-03-04"): [1, 1, 0, 0, 0, 0],
+    }
+    found = {(label, row["unit"], str(collected)[:10]): row[columns].astype(int).tolist()
+             for (label, collected), row in specimens.iterrows()}
+    assert found == expected
+    stays = built_site["stay_months"].set_index("label_id")
+    assert stays.loc["H1", ["sars_cov2_cases", "influenza_cases"]].tolist() == [0, 1]
+    assert stays.loc["H2", ["sars_cov2_cases", "influenza_cases", "rsv_cases"]].tolist() == [1, 0, 0]
+    assert stays.loc["H4", "influenza_cases"] == 0

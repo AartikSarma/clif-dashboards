@@ -173,3 +173,13 @@ def test_rass_by_hour_of_day(built_site):
     assert mean["heatmap"]["floor"] is None
     target = client.get("/api/liberation/heatmap/rass_target").json()
     assert target["values"][13][0] == 100 and target["values"][20][0] == 0
+
+
+def test_values_by_day_of_week(built_site):
+    cfg, _ = built_site
+    client = TestClient(create_app(cfg, [LIBERATION]))
+    rass = client.get("/api/liberation/heatmap/rass_mean", params={"by": "weekday"}).json()
+    # Wednesday Jan 10: -4 at 18:00; Thursday Jan 11: +1 at 10:00
+    assert rass["values"][2][18] == -4 and rass["values"][3][10] == 1 and rass["values"][0][18] is None
+    propofol = client.get("/api/liberation/heatmap/propofol_rate", params={"by": "weekday"}).json()
+    assert propofol["values"][2][12] == 20 and propofol["values"][3][3] == 40

@@ -7,6 +7,9 @@ from . import build
 STAY_MONTHS = RowTable("stay_months", "row_id", "ICU stay-month", "ICU stay-months")
 STARTS = RowTable("antibiotic_starts", "row_id", "antibacterial start", "antibacterial starts")
 ISOLATES = RowTable("isolates", "row_id", "first isolate", "first isolates")
+SPECIMENS = RowTable("respiratory_specimens", "row_id", "respiratory virus specimen", "respiratory virus specimens")
+VIRUSES = {"sars_cov2": "SARS-CoV-2", "influenza": "influenza", "rsv": "RSV",
+           "other_respiratory_virus": "other respiratory virus"}
 
 
 def _any(column):
@@ -32,6 +35,11 @@ METRICS = [
            missed=_any("ctx_num"), missed_label="with a resistant isolate"),
     Metric("carbapenem_ns_gram_negatives", "isolates", "ratio", "carb_num", "carb_den", "gram-negative isolates",
            missed=_any("carb_num"), missed_label="with a resistant isolate"),
+    *[Metric(f"{group}_cases", "stay_months", "rate", f"{group}_cases", "days_present", "days present", scale=1000,
+             missed=_any(f"{group}_cases"), missed_label="with a case") for group in build.RESPIRATORY_GROUPS],
+    *[Metric(f"{group}_positivity", "respiratory_specimens", "ratio", f"detected_{group}", f"tested_{group}",
+             f"{name} tests", missed=_any(f"detected_{group}"), missed_label="with a positive test")
+      for group, name in VIRUSES.items()],
 ]
 
 MICROBIOLOGY = Dashboard(
@@ -42,16 +50,18 @@ MICROBIOLOGY = Dashboard(
     site_statistics=build.site_statistics,
     build=build.build,
     data_quality=build.data_quality,
-    row_tables=(STAY_MONTHS, STARTS, ISOLATES),
+    row_tables=(STAY_MONTHS, STARTS, ISOLATES, SPECIMENS),
     metrics=METRICS,
-    domains=["Diagnostic stewardship", "Hospital-onset infections", "Resistance"],
+    domains=["Diagnostic stewardship", "Hospital-onset infections", "Resistance", "Respiratory virus cases",
+             "Respiratory virus test positivity"],
     strata=[("unit", "ICU"), ("hospital", "Hospital"), ("sex", "Sex"), ("race_eth", "Race / ethnicity"),
             ("age_band", "Age band")],
     filters=(),
     completeness=[],
     # Cultures cluster within patients, so rates per day present get no limits; draws, starts and isolates do
     independent_denominators=frozenset({"blood culture draws", "antibacterial starts", "S. aureus isolates",
-                                        "Enterobacterales isolates", "gram-negative isolates"}),
+                                        "Enterobacterales isolates", "gram-negative isolates",
+                                        *[f"{name} tests" for name in VIRUSES.values()]}),
     heatmaps=(Heatmap("antibiotic_start", "New antibacterial start", "antibiotic_starts", "antibacterial starts",
                       time_column="start_time", note="The first dose of each new antibacterial start in the ICU."),),
 )

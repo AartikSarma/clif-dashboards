@@ -391,3 +391,82 @@ export function HourMonthHeatmap({ data, share, event, unit, floor = 0 }) {
     </div>
   );
 }
+
+/** By day of week (rows, Monday first) and hour of day (columns), over the months `data.period` spans.
+    Events: the average per day (count ÷ that weekday's days in the period), or with `share` each cell's
+    percent of all events. Values (data.values): a rate or share per cell, in `unit`. */
+export function WeekHourHeatmap({ data, share, event, unit, floor = 0 }) {
+  const [ref, w] = useWidth();
+  const [hover, setHover] = useState(null);
+  const isValues = data.values != null;
+  const { weekdays, n } = data;
+  const m = { t: 20, r: 70, b: 26, l: 86 };
+  const cell = 24;
+  const iw = Math.max(48, w - m.l - m.r), ih = cell * 7, height = ih + m.t + m.b;
+  const cw = iw / 24;
+  const value = (d, h) => (isValues ? data.values[d][h]
+    : share ? (n ? (100 * data.counts[d][h]) / n : null) : (data.days[d] ? data.counts[d][h] / data.days[d] : null));
+  const cells = weekdays.flatMap((_, d) => Array.from({ length: 24 }, (_, h) => value(d, h))).filter((v) => v != null).sort((a, b) => a - b);
+  const max = cells.length ? cells[Math.min(cells.length - 1, Math.floor(0.98 * (cells.length - 1)))] || cells[cells.length - 1] : 0;
+  const capped = cells.length && max < cells[cells.length - 1];
+  const min = floor == null && cells.length ? cells[Math.floor(0.02 * (cells.length - 1))] : 0;
+  const floored = floor == null && cells.length && min > cells[0];
+  const colour = (v) => viridis(max > min ? (v - min) / (max - min) : 0);
+  // Right-hand bars: each weekday as a whole (events per day, or its share of all; values over the whole day)
+  const dayTotals = weekdays.map((_, d) => (isValues ? data.weekday_values[d] ?? 0
+    : share ? (n ? (100 * data.counts[d].reduce((a, b) => a + b, 0)) / n : 0)
+    : (data.days[d] ? data.counts[d].reduce((a, b) => a + b, 0) / data.days[d] : 0)));
+  const base = floor == null ? Math.min(0, ...dayTotals) : 0;
+  const dayMax = Math.max(1e-9, ...dayTotals.map((t) => t - base));
+  const digits = (v) => (Math.abs(v) < 10 ? 2 : 1);
+  const fmtValue = (v) => (v == null ? "—" : isValues ? `${v.toLocaleString(undefined, { maximumFractionDigits: digits(v) })} ${unit}`
+    : share ? `${v.toFixed(1)}%` : `${v.toLocaleString(undefined, { maximumFractionDigits: digits(v) })} per day`);
+  const onMove = (ev) => {
+    const r = ev.currentTarget.getBoundingClientRect();
+    const h = Math.floor((ev.clientX - r.left - m.l) / cw), d = Math.floor((ev.clientY - r.top - m.t) / cell);
+    setHover(h >= 0 && h < 24 && d >= 0 && d < 7 ? { d, h, x: ev.clientX - r.left, y: ev.clientY - r.top } : null);
+  };
+  return (
+    <div ref={ref} className="viz-wrap" style={{ height: height + 34 }}>
+      <svg width={w} height={height} role="img" aria-label={`${event} by day of week and hour`} onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}>
+        <g transform={`translate(${m.l},${m.t})`}>
+          {weekdays.map((_, d) => Array.from({ length: 24 }, (_, h) => {
+            const v = value(d, h);
+            return <rect key={`${d}-${h}`} x={h * cw} y={d * cell} width={Math.max(1, cw - 1)} height={cell - 1}
+              fill={v == null ? "var(--surface-2)" : colour(v)} />;
+          }))}
+          {weekdays.map((day, d) => (
+            <text key={day} x={-8} y={d * cell + cell / 2} dy="0.32em" textAnchor="end" className="tick">{day}</text>
+          ))}
+          {Array.from({ length: 8 }, (_, k) => k * 3).map((h) => (
+            <text key={h} x={h * cw + cw / 2} y={ih + 16} textAnchor="middle" className="tick">{hourLabel(h)}</text>
+          ))}
+          {dayTotals.map((t, d) => (
+            <rect key={d} x={iw + 8} y={d * cell + 2} height={cell - 4} width={Math.max(0, (52 * (t - base)) / dayMax)} className="hour-bar" />
+          ))}
+          <text x={iw + 8} y={-8} className="tick">Whole day</text>
+          {hover && <rect x={hover.h * cw} y={hover.d * cell} width={cw} height={cell} className="cell-focus" />}
+        </g>
+      </svg>
+      <div className="heat-legend">
+        <span>{floored ? "≤ " : ""}{isValues ? fmtValue(min) : share ? "0%" : "0"}</span>
+        <i style={{ background: `linear-gradient(to right, ${VIRIDIS.join(", ")})` }} />
+        <span>{capped ? "≥ " : ""}{fmtValue(max)}{!isValues && share ? " of all" : ""}</span>
+        <span className="muted">{isValues ? `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${event}` : `${n.toLocaleString()} ${event}`} in all</span>
+      </div>
+      {hover && (
+        <Tooltip x={hover.x} y={hover.y} w={w}>
+          <b>{weekdays[hover.d]} · {hourLabel(hover.h)}–{String(hover.h).padStart(2, "0")}:59</b>
+          {isValues ? <>
+            <div>{fmtValue(data.values[hover.d][hover.h])}</div>
+            <div className="muted">{data.weights[hover.d][hover.h].toLocaleString(undefined, { maximumFractionDigits: 1 })} {event}</div>
+          </> : <>
+            <div>{data.counts[hover.d][hover.h].toLocaleString()} {event} over {data.days[hover.d].toLocaleString()} {weekdays[hover.d]}s</div>
+            <div className="muted">{fmtValue(value(hover.d, hover.h))}{share ? " of all" : ""}</div>
+          </>}
+        </Tooltip>
+      )}
+    </div>
+  );
+}

@@ -42,7 +42,7 @@ DAY_COUNTS = ["pain_days", "rass_days", "rass_readings", "rass_in_range", "rass_
 # Drugs with a dose heatmap, in page order; each one's unit is a decision (dose_units)
 DOSE_DRUGS = ("propofol", "dexmedetomidine", "midazolam", "lorazepam", "ketamine", "fentanyl", "hydromorphone",
               "morphine")
-BIN_KEY = ["month", "hospital", "unit", "hour"]
+BIN_KEY = ["month", "hospital", "unit", "weekday", "hour"]
 
 
 def shared_values(decisions: dict) -> dict:
@@ -263,7 +263,7 @@ def sedation_hours(con, cfg: SiteConfig, decisions: dict, first_day, last_day) -
     binned = con.execute(interval_hours_sql(every, first_day, last_day)).df()
     con.unregister("dose_rows")
 
-    binned["hour"] = binned["hour"].astype(int)
+    binned[["weekday", "hour"]] = binned[["weekday", "hour"]].astype(int)
     wide = binned.pivot_table(index=BIN_KEY, columns="kind", values=["hours", "rate_hours", "rated_hours"],
                               aggfunc="sum", fill_value=0.0)
     table = pd.DataFrame(index=wide.index)
@@ -274,7 +274,6 @@ def sedation_hours(con, cfg: SiteConfig, decisions: dict, first_day, last_day) -
         table[f"{drug}_rate_hours"] = wide["rate_hours"].get(drug, 0.0)
         table[f"{drug}_rated_hours"] = wide["rated_hours"].get(drug, 0.0)
     table = table.round(4).reset_index()
-    table["row_id"] = table[BIN_KEY].astype(str).agg(" · ".join, axis=1)
     return table, {"units": units, "conversion": counts}
 
 
@@ -292,7 +291,8 @@ def rass_hours(con, cfg: SiteConfig, decisions: dict, paralytic_runs: str, first
                         "TRY_CAST(s.numerical_value AS DOUBLE) AS numerical",
                         where=f"lower(CAST(s.assessment_category AS VARCHAR)) IN ({quoted(categories['rass'])})")
     frame = con.execute(f"""
-        SELECT strftime(p.event_dttm, '%Y-%m') AS month, p.hospital, p.unit, hour(p.event_dttm) AS hour,
+        SELECT strftime(p.event_dttm, '%Y-%m') AS month, p.hospital, p.unit, isodow(p.event_dttm) - 1 AS weekday,
+               hour(p.event_dttm) AS hour,
                count(*) AS rass_readings, sum(numerical) AS rass_sum,
                count(*) FILTER (WHERE numerical BETWEEN {low} AND {high}) AS rass_in_range,
                count(*) FILTER (WHERE numerical <= {deep}) AS rass_deep
@@ -303,8 +303,21 @@ def rass_hours(con, cfg: SiteConfig, decisions: dict, paralytic_runs: str, first
                           AND r.start_dttm <= p.event_dttm AND p.event_dttm < r.end_dttm)
         GROUP BY ALL
     """).df()
-    frame["hour"] = frame["hour"].astype(int)
+    frame[["weekday", "hour"]] = frame[["weekday", "hour"]].astype(int)
     return frame
+
+
+def compact(hours: pd.DataFrame) -> pd.DataFrame:
+    """The binned table as the server holds it: a whole-number row_id, categorical keys and 32-bit numbers,
+    which keeps it to a few bytes a row at a large site (hundreds of thousands of rows)."""
+    hours = hours.reset_index(drop=True)
+    hours.insert(0, "row_id", range(len(hours)))
+    for column in ("hospital", "unit"):   # month stays text: the month filter compares it with < and >
+        hours[column] = hours[column].astype("category")
+    hours[["weekday", "hour"]] = hours[["weekday", "hour"]].astype("int8")
+    numbers = [c for c in hours.columns if c not in ("row_id", *BIN_KEY)]
+    hours[numbers] = hours[numbers].astype("float32")
+    return hours
 
 
 def build(site: SiteBuild) -> BuildResult:
@@ -340,7 +353,7 @@ def build(site: SiteBuild) -> BuildResult:
                                 on=BIN_KEY, how="outer")
             hours[RASS_COLUMNS] = hours[RASS_COLUMNS].fillna(0)
             hours = hours.fillna({c: 0.0 for c in hours.columns if c.endswith("_hours")})
-            hours["row_id"] = hours[BIN_KEY].astype(str).agg(" · ".join, axis=1)
+            hours = compact(hours)
     log(f"Assessments on {len(assessments):,} ICU days; infusions on {infusions[DAY_KEY].drop_duplicates().shape[0]:,}; "
         f"invasive ventilation on {len(ventilated):,}")
 
