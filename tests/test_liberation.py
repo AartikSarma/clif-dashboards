@@ -160,3 +160,16 @@ def test_infusion_hours_and_rates_by_hour_of_day(built_site):
     sedated = client.get("/api/liberation/heatmap/sedative_time").json()
     # 03:00: in the ICU on Jan 11 and Jan 12 (2 h), on propofol on Jan 11 only
     assert sedated["values"][3][0] == pytest.approx(50)
+
+
+def test_rass_by_hour_of_day(built_site):
+    cfg, output = built_site
+    hours = pd.read_parquet(output / "sedation_hours.parquet")
+    # 0, -4 and -4 on Jan 10 and +1 on Jan 11; the -5 during cisatracurium and the reading after the ICU are left out
+    assert hours[["rass_readings", "rass_sum", "rass_in_range", "rass_deep"]].sum().tolist() == [4, -7, 2, 2]
+    client = TestClient(create_app(cfg, [LIBERATION]))
+    mean = client.get("/api/liberation/heatmap/rass_mean").json()
+    assert mean["values"][18][0] == -4 and mean["values"][10][0] == 1 and mean["values"][2][0] is None
+    assert mean["heatmap"]["floor"] is None
+    target = client.get("/api/liberation/heatmap/rass_target").json()
+    assert target["values"][13][0] == 100 and target["values"][20][0] == 0

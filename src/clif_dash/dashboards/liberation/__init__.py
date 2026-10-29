@@ -16,6 +16,14 @@ HEATMAPS = (
             note="The share of ICU time in each hour with any continuous sedative running (propofol, midazolam, "
                  "lorazepam, dexmedetomidine, ketamine; opioids alone are not counted). This is the view that shows "
                  "when patients are sedated."),
+    Heatmap("rass_mean", "Mean RASS", "sedation_hours", "RASS readings", hour_column="hour",
+            numerator="rass_sum", denominator="rass_readings", unit="RASS", floor=None,
+            note="The mean of the RASS readings recorded in each hour, leaving out readings during a paralytic "
+                 "infusion, as the light-sedation measure does. Lower is deeper sedation; the colours run from the "
+                 "lowest mean shown to the highest."),
+    Heatmap("rass_target", "RASS in the target range", "sedation_hours", "RASS readings", hour_column="hour",
+            numerator="rass_in_range", denominator="rass_readings", scale=100, unit="% of readings",
+            note="The share of RASS readings from −2 to +1 (the light-sedation measure's range) in each hour."),
     *(Heatmap(f"{drug}_rate", f"{DRUG_NAMES[drug]} infusion rate", "sedation_hours", f"{drug} infusion hours",
               hour_column="hour", numerator=f"{drug}_rate_hours", denominator=f"{drug}_rated_hours",
               note=f"The mean charted {drug} infusion rate while it was running, weighted by time. It is the "

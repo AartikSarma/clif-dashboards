@@ -230,6 +230,7 @@ class Heatmap:
     denominator: str | None = None
     scale: float = 1.0
     unit: str = ""
+    floor: float | None = 0.0    # where the colour scale starts; None starts it at the data (mean RASS is negative)
     note: str = ""
 
     @property
@@ -238,7 +239,7 @@ class Heatmap:
 
     def public(self, units: dict | None = None) -> dict:
         return {"id": self.id, "title": self.title, "event": self.event, "note": self.note, "kind": self.kind,
-                "unit": (units or {}).get(self.id, self.unit)}
+                "unit": (units or {}).get(self.id, self.unit), "floor": self.floor}
 
 
 @dataclass(frozen=True)

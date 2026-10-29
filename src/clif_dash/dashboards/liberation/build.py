@@ -10,7 +10,9 @@ unit at one hospital in one month.
 
 A second table, sedation_hours, feeds the Time of day page: hours on each
 sedative and opioid infusion and the charted rate, converted to one unit per
-drug with clifpy's dose converter, by month, hospital, unit and hour of day.
+drug with clifpy's dose converter, and RASS readings (outside paralytic
+infusions, as on the light-sedation measure), by month, hospital, unit and
+hour of day.
 It holds no encounter or demographics, so it stays small at a large site
 (tens of thousands of rows), and the sex, race and age filters do not apply
 to it.
@@ -276,6 +278,35 @@ def sedation_hours(con, cfg: SiteConfig, decisions: dict, first_day, last_day) -
     return table, {"units": units, "conversion": counts}
 
 
+RASS_COLUMNS = ["rass_readings", "rass_sum", "rass_in_range", "rass_deep"]
+
+
+def rass_hours(con, cfg: SiteConfig, decisions: dict, paralytic_runs: str, first_day, last_day) -> pd.DataFrame:
+    """RASS readings outside a paralytic infusion, by month, hospital, unit and local hour of day:
+    how many, their sum (for the mean), and how many in the target range and deep."""
+    categories = assessment_categories(decisions)
+    low, high = metric_values(decisions, "light_sedation")["target_range"]
+    deep = metric_values(decisions, "deep_sedation")["threshold"]
+    rass_low, rass_high = outlier_bounds("patient_assessments", "numerical_value", "RASS")
+    placed = placed_sql(con, cfg, "patient_assessments", "recorded_dttm",
+                        "TRY_CAST(s.numerical_value AS DOUBLE) AS numerical",
+                        where=f"lower(CAST(s.assessment_category AS VARCHAR)) IN ({quoted(categories['rass'])})")
+    frame = con.execute(f"""
+        SELECT strftime(p.event_dttm, '%Y-%m') AS month, p.hospital, p.unit, hour(p.event_dttm) AS hour,
+               count(*) AS rass_readings, sum(numerical) AS rass_sum,
+               count(*) FILTER (WHERE numerical BETWEEN {low} AND {high}) AS rass_in_range,
+               count(*) FILTER (WHERE numerical <= {deep}) AS rass_deep
+        FROM ({placed}) AS p
+        WHERE p.numerical BETWEEN {rass_low} AND {rass_high}
+          AND p.day BETWEEN DATE '{first_day:%Y-%m-%d}' AND DATE '{last_day:%Y-%m-%d}'
+          AND NOT EXISTS (SELECT 1 FROM ({paralytic_runs}) AS r WHERE r.encounter_block = p.encounter_block
+                          AND r.start_dttm <= p.event_dttm AND p.event_dttm < r.end_dttm)
+        GROUP BY ALL
+    """).df()
+    frame["hour"] = frame["hour"].astype(int)
+    return frame
+
+
 def build(site: SiteBuild) -> BuildResult:
     cfg, con = site.cfg, site.con
     tz = cfg.site_timezone
@@ -304,6 +335,12 @@ def build(site: SiteBuild) -> BuildResult:
         ventilated = ventilated_days(con, cfg, decisions)
         hours, doses = sedation_hours(con, cfg, decisions, first_day, last_day) if len(days) \
             else (pd.DataFrame(columns=["row_id", *BIN_KEY]), {"units": {}, "conversion": {}})
+        if len(days):
+            hours = hours.merge(rass_hours(con, cfg, decisions, paralytic_runs, first_day, last_day),
+                                on=BIN_KEY, how="outer")
+            hours[RASS_COLUMNS] = hours[RASS_COLUMNS].fillna(0)
+            hours = hours.fillna({c: 0.0 for c in hours.columns if c.endswith("_hours")})
+            hours["row_id"] = hours[BIN_KEY].astype(str).agg(" · ".join, axis=1)
     log(f"Assessments on {len(assessments):,} ICU days; infusions on {infusions[DAY_KEY].drop_duplicates().shape[0]:,}; "
         f"invasive ventilation on {len(ventilated):,}")
 

@@ -312,7 +312,7 @@ const hourLabel = (h) => `${String(h).padStart(2, "0")}:00`;
 /** By hour of day (rows) and month (columns). Events: counts, or with `share` each month's percent.
     Values (data.values): a rate or share per cell, in `unit`, with the hours behind it (data.weights).
     The bars on the right sum or average every month shown. */
-export function HourMonthHeatmap({ data, share, event, unit }) {
+export function HourMonthHeatmap({ data, share, event, unit, floor = 0 }) {
   const [ref, w] = useWidth();
   const [hover, setHover] = useState(null);
   const isValues = data.values != null;
@@ -328,8 +328,14 @@ export function HourMonthHeatmap({ data, share, event, unit }) {
   const cells = counts.flatMap((row, h) => row.map((_, j) => value(h, j))).filter((v) => v != null).sort((a, b) => a - b);
   const max = cells.length ? cells[Math.min(cells.length - 1, Math.floor(0.98 * (cells.length - 1)))] || cells[cells.length - 1] : 0;
   const capped = cells.length && max < cells[cells.length - 1];
+  // A heatmap without a floor (mean RASS, which is negative) starts its colours at the 2nd percentile instead of 0
+  const min = floor == null && cells.length ? cells[Math.floor(0.02 * (cells.length - 1))] : 0;
+  const floored = floor == null && cells.length && min > cells[0];
+  const colour = (v) => viridis(max > min ? (v - min) / (max - min) : 0);
   const hourTotals = isValues ? data.hour_values.map((v) => v ?? 0) : counts.map((row) => row.reduce((a, b) => a + b, 0));
-  const hourMax = Math.max(isValues ? 1e-9 : 1, ...hourTotals);
+  // The all-months bars are drawn from the colour scale's start, so negative means still show
+  const hourMax = Math.max(isValues ? 1e-9 : 1, ...hourTotals.map((t) => t - (floor == null ? Math.min(0, ...hourTotals) : 0)));
+  const barLength = (t) => (52 * (t - (floor == null ? Math.min(0, ...hourTotals) : 0))) / hourMax;
   const step = Math.ceil(months.length / Math.max(1, Math.floor(iw / 64)));
   const fmtValue = (v) => (v == null ? "—" : isValues ? `${v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : 1 })} ${unit}`
     : share ? `${v.toFixed(1)}%` : v.toLocaleString());
@@ -348,7 +354,7 @@ export function HourMonthHeatmap({ data, share, event, unit }) {
           {counts.map((row, h) => row.map((_, j) => {
             const v = value(h, j);
             return <rect key={`${h}-${j}`} x={x(months[j])} y={h * cell} width={Math.max(1, x.bandwidth() - 0.5)}
-              height={cell - 0.5} fill={v == null ? "var(--surface-2)" : viridis(max ? v / max : 0)} />;
+              height={cell - 0.5} fill={v == null ? "var(--surface-2)" : colour(v)} />;
           }))}
           {[0, 3, 6, 9, 12, 15, 18, 21].map((h) => (
             <text key={h} x={-6} y={h * cell + cell / 2} dy="0.32em" textAnchor="end" className="tick">{hourLabel(h)}</text>
@@ -357,14 +363,14 @@ export function HourMonthHeatmap({ data, share, event, unit }) {
             <text key={mo} x={x(mo) + x.bandwidth() / 2} y={ih + 18} textAnchor="middle" className="tick">{monthLabel(mo)}</text>
           ))}
           {hourTotals.map((t, h) => (
-            <rect key={h} x={iw + 8} y={h * cell + 1} height={cell - 2} width={(52 * t) / hourMax} className="hour-bar" />
+            <rect key={h} x={iw + 8} y={h * cell + 1} height={cell - 2} width={Math.max(0, barLength(t))} className="hour-bar" />
           ))}
           <text x={iw + 8} y={-8} className="tick">All months</text>
           {hover && <rect x={x(months[hover.j])} y={hover.h * cell} width={x.bandwidth()} height={cell} className="cell-focus" />}
         </g>
       </svg>
       <div className="heat-legend">
-        <span>{isValues ? `0 ${unit}` : share ? "0%" : "0"}</span>
+        <span>{isValues ? `${floored ? "≤ " : ""}${fmtValue(min)}` : share ? "0%" : "0"}</span>
         <i style={{ background: `linear-gradient(to right, ${VIRIDIS.join(", ")})` }} />
         <span>{capped ? "≥ " : ""}{fmtValue(max)}{isValues ? "" : share ? " of the month" : ` ${event}`}</span>
         <span className="muted">{isValues ? hours(n) : `${n.toLocaleString()} ${event}`} in all</span>

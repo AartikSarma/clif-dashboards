@@ -833,7 +833,7 @@ function HeatmapCard({ heatmap, F, share }) {
       {heatmap.note && <p className="muted">{heatmap.note}</p>}
       <Loading state={state}>{(data) => data.n
         ? <>{data.heatmap.unfiltered.length > 0 && <p className="muted">Not filtered by {data.heatmap.unfiltered.join(", ").toLowerCase()}: this heatmap is built without them.</p>}
-          <HourMonthHeatmap data={data} share={share} event={heatmap.event} unit={heatmap.unit} /></>
+          <HourMonthHeatmap data={data} share={share} event={heatmap.event} unit={heatmap.unit} floor={heatmap.floor} /></>
         : <p className="empty">No {heatmap.event} under the current filters.</p>}</Loading>
     </section>
   );
